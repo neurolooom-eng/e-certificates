@@ -1,0 +1,35 @@
+{
+  "name": "e-certificates",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "15.3.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "googleapis": "^144.0.0",
+    "xlsx": "^0.18.5",
+    "uuid": "^11.1.0",
+    "sharp": "^0.33.5",
+    "next-auth": "^4.24.11",
+    "bcryptjs": "^2.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/uuid": "^10",
+    "typescript": "^5",
+    "tailwindcss": "^3.4.1",
+    "postcss": "^8",
+    "autoprefixer": "^10",
+    "eslint": "^9",
+    "eslint-config-next": "15.3.3",
+    "@types/bcryptjs": "^2.4.6"
+  }
+}
