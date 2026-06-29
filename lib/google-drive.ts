@@ -11,15 +11,29 @@ function getDrive() {
   return google.drive({ version: "v3", auth });
 }
 
+/**
+ * Root folder: must be a Google Drive folder owned by a real user
+ * and shared (Editor) with the service account.
+ * Set GOOGLE_DRIVE_FOLDER_ID in your environment variables.
+ */
+export function getRootFolderId(): string {
+  const id = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!id) throw new Error(
+    "GOOGLE_DRIVE_FOLDER_ID is not set. Create a folder in Google Drive, share it with the service account (Editor), and paste the folder ID as this env var."
+  );
+  return id;
+}
+
 // ── Folders ────────────────────────────────────────────────────────────────
 
 export async function createFolder(name: string, parentId?: string) {
   const drive = getDrive();
+  const parent = parentId ?? getRootFolderId();
   const res = await drive.files.create({
     requestBody: {
       name,
       mimeType: "application/vnd.google-apps.folder",
-      ...(parentId ? { parents: [parentId] } : {}),
+      parents: [parent],
     },
     fields: "id, webViewLink",
   });
@@ -40,18 +54,10 @@ export async function uploadFileBuffer(
   const res = await drive.files.create({
     requestBody: { name: fileName, parents: [folderId] },
     media: { mimeType, body: Readable.from(buffer) },
-    fields: "id, webViewLink, webContentLink",
+    fields: "id, webViewLink",
   });
   if (makeFilePublic) await makePublic(drive, res.data.id!);
-  return {
-    id: res.data.id!,
-    link: res.data.webViewLink!,
-    downloadLink: res.data.webContentLink ?? undefined,
-  };
-}
-
-export async function getFileDownloadUrl(fileId: string): Promise<string> {
-  return `https://drive.google.com/uc?export=download&id=${fileId}`;
+  return { id: res.data.id!, link: res.data.webViewLink! };
 }
 
 async function makePublic(drive: ReturnType<typeof google.drive>, fileId: string) {
@@ -61,24 +67,7 @@ async function makePublic(drive: ReturnType<typeof google.drive>, fileId: string
   });
 }
 
-// ── Root app folder (created once, shared by all tournaments) ──────────────
-
-let _rootFolderId: string | null = null;
-
+// ── Kept for backwards compat (generate route uses this) ──────────────────
 export async function getRootFolder(): Promise<string> {
-  if (_rootFolderId) return _rootFolderId;
-  const drive = getDrive();
-  // Look for existing folder
-  const list = await drive.files.list({
-    q: "name='E-Certificates App' and mimeType='application/vnd.google-apps.folder' and trashed=false",
-    fields: "files(id)",
-    spaces: "drive",
-  });
-  if (list.data.files?.length) {
-    _rootFolderId = list.data.files[0].id!;
-    return _rootFolderId;
-  }
-  const folder = await createFolder("E-Certificates App");
-  _rootFolderId = folder.id;
-  return _rootFolderId;
+  return getRootFolderId();
 }

@@ -69,8 +69,14 @@ async function driveWriteJson(fileName: string, data: unknown) {
   const body = JSON.stringify(data);
   const stream = Readable.from(Buffer.from(body));
 
+  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
+  if (!rootFolderId) throw new Error(
+    "GOOGLE_DRIVE_FOLDER_ID is not set. Create a Google Drive folder, share it with the service account (Editor), and add the folder ID as this env var."
+  );
+
+  // Search only within the shared root folder
   const list = await drive.files.list({
-    q: `name='${fileName}' and trashed=false`,
+    q: `name='${fileName}' and '${rootFolderId}' in parents and trashed=false`,
     fields: "files(id)",
     spaces: "drive",
   });
@@ -83,7 +89,7 @@ async function driveWriteJson(fileName: string, data: unknown) {
     });
   } else {
     await drive.files.create({
-      requestBody: { name: fileName },
+      requestBody: { name: fileName, parents: [rootFolderId] },
       media: { mimeType: "application/json", body: stream },
       fields: "id",
     });

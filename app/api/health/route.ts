@@ -17,14 +17,17 @@ export async function GET() {
     }
   }
 
+  const hasFolderId = !!process.env.GOOGLE_DRIVE_FOLDER_ID;
+
   return NextResponse.json({
-    ok: hasDriveKey && driveKeyValid && hasNextAuthSecret,
+    ok: hasDriveKey && driveKeyValid && hasNextAuthSecret && hasFolderId,
     env: isVercel ? "vercel" : "local",
     checks: {
       NEXTAUTH_SECRET: hasNextAuthSecret,
       GOOGLE_SERVICE_ACCOUNT_JSON: hasDriveKey,
       driveKeyValid,
       driveEmail,
+      GOOGLE_DRIVE_FOLDER_ID: hasFolderId,
     },
   });
 }
