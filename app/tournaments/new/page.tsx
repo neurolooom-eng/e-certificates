@@ -123,6 +123,7 @@ export default function NewTournamentPage() {
   const [name, setName] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
+  const [templateSizeKb, setTemplateSizeKb] = useState<number | null>(null);
   const [dataFile, setDataFile] = useState<File | null>(null);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
   const [textColor, setTextColor] = useState("#8B1E1E");
@@ -133,6 +134,31 @@ export default function NewTournamentPage() {
   const [error, setError] = useState("");
   const templateRef = useRef<HTMLInputElement>(null);
   const dataRef = useRef<HTMLInputElement>(null);
+
+  // Compress + resize template image client-side to stay under Vercel's 4.5MB body limit
+  function compressImage(file: File): Promise<File> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAX = 1600;
+        let { width, height } = img;
+        if (width > MAX) { height = Math.round((height * MAX) / width); width = MAX; }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => resolve(blob ? new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }) : file),
+          "image/jpeg",
+          0.88
+        );
+      };
+      img.onerror = () => resolve(file); // fallback: use original
+      img.src = url;
+    });
+  }
 
   function handleDataFile(file: File) {
     setDataFile(file);
@@ -245,7 +271,10 @@ export default function NewTournamentPage() {
                 onClick={() => templateRef.current?.click()}
               >
                 {templateFile ? (
-                  <p className="text-sm text-green-600">✓ {templateFile.name}</p>
+                  <div>
+                    <p className="text-sm text-green-600">✓ {templateFile.name}</p>
+                    {templateSizeKb && <p className="text-xs text-gray-400 mt-0.5">{templateSizeKb} KB (compressed)</p>}
+                  </div>
                 ) : (
                   <p className="text-sm text-gray-400">Click to upload template image</p>
                 )}
@@ -255,7 +284,13 @@ export default function NewTournamentPage() {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => e.target.files?.[0] && setTemplateFile(e.target.files[0])}
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  const compressed = await compressImage(f);
+                  setTemplateFile(compressed);
+                  setTemplateSizeKb(Math.round(compressed.size / 1024));
+                }}
               />
             </div>
             <div>
