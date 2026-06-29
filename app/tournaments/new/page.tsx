@@ -129,6 +129,7 @@ export default function NewTournamentPage() {
   const [fields, setFields] = useState<FieldConfig[]>(DEFAULT_FIELDS);
   const [columns, setColumns] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [submitStep, setSubmitStep] = useState("");
   const [error, setError] = useState("");
   const templateRef = useRef<HTMLInputElement>(null);
   const dataRef = useRef<HTMLInputElement>(null);
@@ -154,6 +155,7 @@ export default function NewTournamentPage() {
     }
     setSubmitting(true);
     setError("");
+    setSubmitStep("Preparing files…");
 
     const config: TournamentConfig = { headerRowIndex, textColor, fields };
     const fd = new FormData();
@@ -163,15 +165,37 @@ export default function NewTournamentPage() {
     fd.append("data", dataFile);
     fd.append("config", JSON.stringify(config));
 
-    const res = await fetch("/api/tournaments", { method: "POST", body: fd });
-    if (!res.ok) {
-      const body = await res.json();
-      setError(body.error || "Failed to create tournament.");
+    // Cycle through status messages so the user knows it's working
+    const steps = [
+      "Uploading certificate template…",
+      "Uploading participant list…",
+      "Saving to Google Drive…",
+      "Almost done…",
+    ];
+    let stepIdx = 0;
+    const stepTimer = setInterval(() => {
+      stepIdx = Math.min(stepIdx + 1, steps.length - 1);
+      setSubmitStep(steps[stepIdx]);
+    }, 4000);
+
+    try {
+      const res = await fetch("/api/tournaments", { method: "POST", body: fd });
+      clearInterval(stepTimer);
+      if (!res.ok) {
+        const body = await res.json();
+        setError(body.error || "Failed to create tournament.");
+        setSubmitting(false);
+        setSubmitStep("");
+        return;
+      }
+      const created = await res.json();
+      router.push(`/tournaments/${created.id}`);
+    } catch {
+      clearInterval(stepTimer);
+      setError("Network error — please try again.");
       setSubmitting(false);
-      return;
+      setSubmitStep("");
     }
-    const created = await res.json();
-    router.push(`/tournaments/${created.id}`);
   }
 
   return (
@@ -333,6 +357,18 @@ export default function NewTournamentPage() {
           </div>
         )}
 
+        {submitting && (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-4 flex items-center gap-4">
+            <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-blue-900">{submitStep}</p>
+              <p className="text-xs text-blue-500 mt-0.5">
+                Files are being uploaded to Google Drive — this takes 15–30 seconds.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-end gap-3">
           <a href="/tournaments" className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
             Cancel
@@ -340,8 +376,11 @@ export default function NewTournamentPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white px-6 py-2 rounded-lg font-medium text-sm transition-colors"
+            className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white px-6 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
           >
+            {submitting && (
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            )}
             {submitting ? "Creating…" : "Create Tournament"}
           </button>
         </div>
