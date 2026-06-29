@@ -60,6 +60,13 @@ export async function POST(request: Request) {
     certificates: [],
   };
 
-  await saveTournament(tournament);
+  try {
+    await saveTournament(tournament);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("saveTournament failed:", msg);
+    return NextResponse.json({ error: `Failed to save tournament: ${msg}` }, { status: 500 });
+  }
+
   return NextResponse.json({ id: tournament.id, name: tournament.name, status: tournament.status }, { status: 201 });
 }

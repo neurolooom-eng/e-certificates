@@ -216,9 +216,10 @@ export default function NewTournamentPage() {
       }
       const created = await res.json();
       router.push(`/tournaments/${created.id}`);
-    } catch {
+    } catch (err: unknown) {
       clearInterval(stepTimer);
-      setError("Network error — please try again.");
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Request failed: ${msg}. Check your Vercel environment variables (GOOGLE_SERVICE_ACCOUNT_JSON).`);
       setSubmitting(false);
       setSubmitStep("");
     }
