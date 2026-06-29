@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { readTournaments, saveTournament, saveUploadedFile } from "@/lib/storage";
-import { getRootFolder, createFolder, uploadFileBuffer, getFileDownloadUrl } from "@/lib/google-drive";
 import type { Tournament, TournamentConfig } from "@/lib/types";
+
+export const maxDuration = 60;
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -36,15 +37,10 @@ export async function POST(request: Request) {
   let dataPath: string;
 
   if (IS_VERCEL) {
-    // Store uploads in Google Drive — survives across serverless invocations
-    const rootId = await getRootFolder();
-    const uploadFolder = await createFolder(`${name} – Uploads`, rootId);
-    const [tmpl, data] = await Promise.all([
-      uploadFileBuffer(templateBuffer, `template.${templateExt}`, templateFile.type || "image/jpeg", uploadFolder.id, false),
-      uploadFileBuffer(dataBuffer, `data.${dataExt}`, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", uploadFolder.id, false),
-    ]);
-    templatePath = await getFileDownloadUrl(tmpl.id);
-    dataPath = await getFileDownloadUrl(data.id);
+    // Embed files as base64 directly in the tournament record.
+    // A single Drive write replaces 4–5 separate API calls → much faster.
+    templatePath = `base64:${templateBuffer.toString("base64")}`;
+    dataPath = `base64:${dataBuffer.toString("base64")}`;
   } else {
     [templatePath, dataPath] = await Promise.all([
       saveUploadedFile(templateBuffer, id, `template.${templateExt}`),
@@ -65,5 +61,5 @@ export async function POST(request: Request) {
   };
 
   await saveTournament(tournament);
-  return NextResponse.json(tournament, { status: 201 });
+  return NextResponse.json({ id: tournament.id, name: tournament.name, status: tournament.status }, { status: 201 });
 }

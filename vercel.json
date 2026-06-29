@@ -1,10 +1,8 @@
 {
   "framework": "nextjs",
-  "buildCommand": "npm run build",
-  "installCommand": "npm install",
   "functions": {
-    "app/api/tournaments/[id]/generate/route.ts": {
-      "maxDuration": 300
-    }
+    "app/api/tournaments/route.ts": { "maxDuration": 60 },
+    "app/api/tournaments/[id]/generate/route.ts": { "maxDuration": 300 },
+    "app/api/tournaments/[id]/preview/route.ts": { "maxDuration": 60 }
   }
 }
