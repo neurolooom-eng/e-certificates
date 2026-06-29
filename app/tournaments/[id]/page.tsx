@@ -5,20 +5,36 @@ import { use } from "react";
 import type { Tournament } from "@/lib/types";
 
 const STATUS_COLOR: Record<string, string> = {
-  draft: "text-gray-600 bg-gray-100",
+  draft:      "text-gray-600 bg-gray-100",
+  previewed:  "text-blue-700 bg-blue-100",
   generating: "text-yellow-700 bg-yellow-100",
-  ready: "text-green-700 bg-green-100",
-  error: "text-red-700 bg-red-100",
+  ready:      "text-green-700 bg-green-100",
+  error:      "text-red-700 bg-red-100",
 };
+
+function Step({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
+  return (
+    <div className={`flex items-center gap-3 ${active ? "opacity-100" : done ? "opacity-60" : "opacity-30"}`}>
+      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold shrink-0
+        ${done ? "bg-green-500 text-white" : active ? "bg-brand-500 text-white" : "bg-gray-200 text-gray-500"}`}>
+        {done ? "✓" : n}
+      </div>
+      <span className={`text-sm font-medium ${active ? "text-gray-900" : "text-gray-500"}`}>{label}</span>
+    </div>
+  );
+}
 
 export default function TournamentPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewName, setPreviewName] = useState<string>("");
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [previewError, setPreviewError] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const fetchTournament = useCallback(async () => {
     const res = await fetch(`/api/tournaments/${id}`);
@@ -26,40 +42,43 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
     setLoading(false);
   }, [id]);
 
-  useEffect(() => {
-    fetchTournament();
-  }, [fetchTournament]);
+  useEffect(() => { fetchTournament(); }, [fetchTournament]);
 
-  // Poll while generating
+  // Poll every 2 s while generating
   useEffect(() => {
     if (tournament?.status !== "generating") return;
-    const interval = setInterval(fetchTournament, 3000);
+    const interval = setInterval(fetchTournament, 2000);
     return () => clearInterval(interval);
   }, [tournament?.status, fetchTournament]);
 
-  async function handleGenerate() {
-    setGenerating(true);
-    setError("");
-    const res = await fetch(`/api/tournaments/${id}/generate`, { method: "POST" });
-    if (!res.ok) {
-      const body = await res.json();
-      setError(body.error || "Generation failed.");
-    }
-    setGenerating(false);
-    fetchTournament();
-  }
-
   async function handlePreview() {
     setPreviewLoading(true);
+    setPreviewError("");
     setPreviewUrl(null);
     const res = await fetch(`/api/tournaments/${id}/preview`);
     if (res.ok) {
       const blob = await res.blob();
       setPreviewUrl(URL.createObjectURL(blob));
+      const name = res.headers.get("X-Recipient-Name");
+      setPreviewName(name ? decodeURIComponent(name) : "");
+      await fetchTournament(); // pick up status = "previewed"
     } else {
-      setError("Preview failed — check your field config.");
+      const body = await res.json().catch(() => ({}));
+      setPreviewError(body.error || "Preview failed — check your field configuration.");
     }
     setPreviewLoading(false);
+  }
+
+  async function handleGenerate() {
+    setGenerating(true);
+    setGenerateError("");
+    const res = await fetch(`/api/tournaments/${id}/generate`, { method: "POST" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setGenerateError(body.error || "Generation failed.");
+    }
+    setGenerating(false);
+    await fetchTournament();
   }
 
   if (loading) {
@@ -74,8 +93,20 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
     return <div className="text-center py-20 text-gray-500">Tournament not found.</div>;
   }
 
-  const isGenerating = tournament.status === "generating" || generating;
-  const isReady = tournament.status === "ready";
+  const status = tournament.status;
+  const isReady = status === "ready";
+  const isGenerating = status === "generating";
+  const isPreviewed = status === "previewed";
+  const isDraft = status === "draft";
+
+  const progress = tournament.progress;
+  const progressPct = progress && progress.total > 0
+    ? Math.round((progress.current / progress.total) * 100)
+    : 0;
+
+  const filtered = tournament.certificates.filter((c) =>
+    c.recipientName.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -91,79 +122,130 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
               })}
             </p>
           </div>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLOR[tournament.status]}`}>
-            {tournament.status}
+          <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLOR[status]}`}>
+            {status}
           </span>
         </div>
       </div>
 
-      {/* Actions */}
+      {/* ── Step flow (only shown before ready) ── */}
       {!isReady && (
         <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-          <h2 className="font-semibold text-gray-900 mb-3">Generate Certificates</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            This will render one certificate per participant, upload them to Google Drive,
-            and populate the table below with clickable links.
-          </p>
 
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={handlePreview}
-              disabled={previewLoading || isGenerating}
-              className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-            >
-              {previewLoading ? "Loading preview…" : "Preview Sample"}
-            </button>
-            <button
-              onClick={handleGenerate}
-              disabled={isGenerating}
-              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white px-6 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
-            >
-              {isGenerating ? (
-                <>
-                  <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                  Generating…
-                </>
-              ) : (
-                "Generate All Certificates"
-              )}
-            </button>
+          {/* Step indicators */}
+          <div className="flex items-center gap-6 mb-6 pb-5 border-b border-gray-100">
+            <Step n={1} label="Preview Sample" active={isDraft} done={isPreviewed || isGenerating || isReady} />
+            <div className="flex-1 h-px bg-gray-200" />
+            <Step n={2} label="Approve & Generate" active={isPreviewed} done={isGenerating || isReady} />
+            <div className="flex-1 h-px bg-gray-200" />
+            <Step n={3} label="Done" active={isGenerating} done={isReady} />
           </div>
 
+          {/* Step 1 – Preview */}
+          {(isDraft || isPreviewed) && (
+            <div className="mb-5">
+              <h2 className="font-semibold text-gray-900 mb-1">Step 1 — Preview a sample certificate</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                We'll render the certificate for the participant with the longest name — the hardest case to fit.
+                Check that the text is positioned correctly before generating all {" "}
+                {tournament.certificates.length > 0 ? tournament.certificates.length : ""} certificates.
+              </p>
+              <button
+                onClick={handlePreview}
+                disabled={previewLoading}
+                className="px-5 py-2 border border-brand-500 text-brand-500 hover:bg-brand-50 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
+              >
+                {previewLoading
+                  ? "Rendering preview…"
+                  : previewUrl
+                  ? "Re-render Preview"
+                  : "Generate Preview"}
+              </button>
+              {previewError && (
+                <p className="text-red-600 text-sm mt-2">{previewError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Preview image */}
+          {previewUrl && (
+            <div className="mb-5 rounded-xl border border-gray-200 overflow-hidden">
+              <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex items-center justify-between">
+                <p className="text-xs text-gray-500">
+                  Sample for: <strong className="text-gray-700">{previewName || "longest name"}</strong>
+                </p>
+                <a href={previewUrl} download="preview.png" className="text-xs text-blue-600 hover:underline">
+                  Download preview
+                </a>
+              </div>
+              <img src={previewUrl} alt="Certificate preview" className="w-full" />
+            </div>
+          )}
+
+          {/* Step 2 – Approve & Generate */}
+          {isPreviewed && !isGenerating && (
+            <div className="border-t border-gray-100 pt-5">
+              <h2 className="font-semibold text-gray-900 mb-1">Step 2 — Approve &amp; generate all certificates</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                Does the preview look correct? Click below to render every certificate and upload them to Google Drive.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setPreviewUrl(null); fetchTournament(); }}
+                  className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+                >
+                  ← Redo Preview
+                </button>
+                <button
+                  onClick={handleGenerate}
+                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
+                >
+                  ✓ Looks Good — Generate All
+                </button>
+              </div>
+              {generateError && (
+                <p className="text-red-600 text-sm mt-2">{generateError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Step 3 – Progress */}
           {isGenerating && (
-            <p className="text-sm text-yellow-600 mt-3 animate-pulse">
-              Rendering certificates and uploading to Google Drive. This may take a few minutes…
-            </p>
+            <div className="border-t border-gray-100 pt-5">
+              <h2 className="font-semibold text-gray-900 mb-3">Generating certificates…</h2>
+              <div className="w-full bg-gray-100 rounded-full h-3 mb-2 overflow-hidden">
+                <div
+                  className="bg-brand-500 h-3 rounded-full transition-all duration-500"
+                  style={{ width: `${progressPct}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-gray-500">
+                <span className="animate-pulse">Uploading to Google Drive…</span>
+                {progress && progress.total > 0 && (
+                  <span className="font-medium text-gray-700">
+                    {progress.current} / {progress.total}
+                  </span>
+                )}
+              </div>
+            </div>
           )}
         </div>
       )}
 
-      {/* Preview */}
-      {previewUrl && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="font-semibold text-gray-900">Certificate Preview (longest name)</h2>
-            <button onClick={() => setPreviewUrl(null)} className="text-gray-400 hover:text-gray-600 text-sm">
-              Close
-            </button>
-          </div>
-          <img src={previewUrl} alt="Certificate preview" className="w-full rounded-lg border border-gray-100 shadow-sm" />
-        </div>
-      )}
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-6">
-          {error}
-        </div>
-      )}
-
-      {tournament.errorMessage && tournament.status === "error" && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-6">
+      {/* Error state */}
+      {status === "error" && tournament.errorMessage && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-6">
           <strong>Error:</strong> {tournament.errorMessage}
+          <button
+            onClick={() => { fetchTournament(); }}
+            className="ml-4 underline text-red-600 hover:text-red-800"
+          >
+            Retry
+          </button>
         </div>
       )}
 
-      {/* Drive Folder Link */}
+      {/* Drive folder link */}
       {tournament.driveFolderLink && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 flex items-center justify-between">
           <div>
@@ -174,52 +256,47 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
             href={tournament.driveFolderLink}
             target="_blank"
             rel="noreferrer"
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors"
+            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors shrink-0 ml-4"
           >
             Open Folder ↗
           </a>
         </div>
       )}
 
-      {/* Certificates Table */}
-      {isReady && tournament.certificates.length > 0 ? (
+      {/* Certificates table */}
+      {tournament.certificates.length > 0 && (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-900">
-              Certificates ({tournament.certificates.length})
+          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
+            <h2 className="font-semibold text-gray-900 shrink-0">
+              Certificates
+              <span className="ml-2 text-sm font-normal text-gray-400">
+                {isGenerating
+                  ? `${tournament.certificates.length} uploaded so far`
+                  : `${tournament.certificates.length} total`}
+              </span>
             </h2>
             <input
               type="text"
               placeholder="Search by name…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56"
-              onChange={(e) => {
-                const q = e.target.value.toLowerCase();
-                const rows = document.querySelectorAll("[data-name]");
-                rows.forEach((r) => {
-                  const name = r.getAttribute("data-name") || "";
-                  (r as HTMLElement).style.display = name.includes(q) ? "" : "none";
-                });
-              }}
             />
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
                 <tr>
-                  <th className="text-left px-6 py-3">#</th>
+                  <th className="text-left px-6 py-3 w-12">#</th>
                   <th className="text-left px-6 py-3">Recipient</th>
-                  <th className="text-left px-6 py-3">Generated At</th>
                   <th className="text-left px-6 py-3">Certificate</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {tournament.certificates.map((cert, i) => (
-                  <tr key={cert.driveFileId} data-name={cert.recipientName.toLowerCase()} className="hover:bg-gray-50">
+                {filtered.map((cert, i) => (
+                  <tr key={cert.driveFileId} className="hover:bg-gray-50">
                     <td className="px-6 py-3 text-gray-400">{i + 1}</td>
                     <td className="px-6 py-3 font-medium text-gray-900">{cert.recipientName}</td>
-                    <td className="px-6 py-3 text-gray-400">
-                      {new Date(cert.generatedAt).toLocaleString()}
-                    </td>
                     <td className="px-6 py-3">
                       <a
                         href={cert.driveLink}
@@ -239,15 +316,18 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
               </tbody>
             </table>
           </div>
+          {searchQuery && filtered.length === 0 && (
+            <p className="text-center text-gray-400 py-8 text-sm">No results for "{searchQuery}"</p>
+          )}
         </div>
-      ) : (
-        !isGenerating && tournament.status !== "error" && (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">
-            <p className="text-4xl mb-3">📜</p>
-            <p className="font-medium">No certificates generated yet.</p>
-            <p className="text-sm mt-1">Click "Generate All Certificates" above to start.</p>
-          </div>
-        )
+      )}
+
+      {/* Empty state */}
+      {!isGenerating && tournament.certificates.length === 0 && status !== "error" && !isDraft && !isPreviewed && (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">
+          <p className="text-4xl mb-3">📜</p>
+          <p className="font-medium">No certificates yet.</p>
+        </div>
       )}
     </div>
   );

@@ -23,9 +23,15 @@ export interface Certificate {
   generatedAt: string;
 }
 
-export type TournamentStatus = "draft" | "generating" | "ready" | "error";
+export type TournamentStatus = "draft" | "previewed" | "generating" | "ready" | "error";
+
+export interface GenerationProgress {
+  current: number;
+  total: number;
+}
 
 export interface Tournament {
+  progress?: GenerationProgress;
   id: string;
   name: string;
   eventDate: string;

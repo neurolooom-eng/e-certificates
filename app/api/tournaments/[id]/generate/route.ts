@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { getTournament, saveTournament, readUploadedFile } from "@/lib/storage";
 import { generateCertificates } from "@/lib/generate-certificates";
-import { createFolder, uploadFileBuffer } from "@/lib/google-drive";
+import { createFolder, uploadFileBuffer, getRootFolder } from "@/lib/google-drive";
 import type { Certificate } from "@/lib/types";
 
-// Vercel Pro: allow up to 5 minutes for large batches
 export const maxDuration = 300;
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -13,6 +12,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   if (!tournament) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   tournament.status = "generating";
+  tournament.progress = { current: 0, total: 0 };
   await saveTournament(tournament);
 
   try {
@@ -21,15 +21,27 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       readUploadedFile(tournament.dataPath),
     ]);
 
+    // Render all certificates in memory first
     const generated = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config);
 
-    const folder = await createFolder(`${tournament.name} – Certificates`);
+    // Update total count so the UI can show X / N
+    tournament.progress = { current: 0, total: generated.length };
+    await saveTournament(tournament);
+
+    const rootId = await getRootFolder();
+    const folder = await createFolder(`${tournament.name} – Certificates`, rootId);
     tournament.driveFolderId = folder.id;
     tournament.driveFolderLink = folder.link;
 
     const certificates: Certificate[] = [];
-    for (const cert of generated) {
-      const { id: fileId, link } = await uploadFileBuffer(cert.buffer, cert.filename, "image/png", folder.id);
+    for (let i = 0; i < generated.length; i++) {
+      const cert = generated[i];
+      const { id: fileId, link } = await uploadFileBuffer(
+        cert.buffer,
+        cert.filename,
+        "image/png",
+        folder.id
+      );
       certificates.push({
         rowIndex: cert.rowIndex,
         recipientName: cert.name,
@@ -37,11 +49,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         driveLink: link,
         generatedAt: new Date().toISOString(),
       });
+
+      // Save progress after each upload so the UI can poll it
+      tournament.certificates = certificates;
+      tournament.progress = { current: i + 1, total: generated.length };
+      await saveTournament(tournament);
     }
 
-    tournament.certificates = certificates;
     tournament.status = "ready";
+    tournament.progress = { current: generated.length, total: generated.length };
     await saveTournament(tournament);
+
     return NextResponse.json({ status: "ready", count: certificates.length });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
