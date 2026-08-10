@@ -2,13 +2,12 @@
  * Storage layer.
  *
  * Local dev  → local filesystem (data/tournaments.json, uploads/<id>/).
- * Vercel     → Google Drive, one JSON file per tournament.
- *              Template image + xlsx are base64-embedded in the tournament
- *              file so creation is a single Drive write — no separate uploads.
+ * Vercel     → Vercel Blob for all files (JSON metadata + certificate PNGs).
  *
- * Drive structure:
- *   e-certificates/index.json        → [{id, name, eventDate, status, createdAt}]
- *   e-certificates/t-<id>.json       → full Tournament (with base64 files)
+ * Blob structure:
+ *   tournaments/index.json          → lightweight Tournament[] list
+ *   tournaments/<id>/tournament.json → full Tournament (with base64 files)
+ *   tournaments/<id>/certs/<file>   → generated certificate PNGs
  */
 import fs from "fs";
 import path from "path";
@@ -35,79 +34,44 @@ function writeLocal(t: Tournament[]) {
   fs.writeFileSync(LOCAL_DATA, JSON.stringify(t, null, 2));
 }
 
-// ── Drive helpers ──────────────────────────────────────────────────────────
+// ── Blob helpers ───────────────────────────────────────────────────────────
 
-const INDEX_NAME = "e-certificates-index.json";
-
-async function driveClient() {
-  const { google } = await import("googleapis");
-  const creds = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!creds) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON not set");
-  const auth = new google.auth.GoogleAuth({
-    credentials: JSON.parse(creds),
-    scopes: ["https://www.googleapis.com/auth/drive"],
-  });
-  return google.drive({ version: "v3", auth });
+async function blobPut(pathname: string, data: string | Buffer, contentType = "application/json") {
+  const { put } = await import("@vercel/blob");
+  await put(pathname, data, { access: "public", contentType, addRandomSuffix: false });
 }
 
-async function driveReadJson<T>(fileName: string): Promise<T | null> {
-  const drive = await driveClient();
-  const list = await drive.files.list({
-    q: `name='${fileName}' and trashed=false`,
-    fields: "files(id)",
-    spaces: "drive",
-  });
-  const file = list.data.files?.[0];
-  if (!file?.id) return null;
-  const res = await drive.files.get({ fileId: file.id, alt: "media" }, { responseType: "json" });
-  return res.data as T;
+async function blobGet<T>(pathname: string): Promise<T | null> {
+  const { list } = await import("@vercel/blob");
+  const { blobs } = await list({ prefix: pathname });
+  const match = blobs.find((b) => b.pathname === pathname);
+  if (!match) return null;
+  const res = await fetch(match.url);
+  if (!res.ok) return null;
+  return res.json() as Promise<T>;
 }
 
-async function driveWriteJson(fileName: string, data: unknown) {
-  const { Readable } = await import("stream");
-  const drive = await driveClient();
-  const body = JSON.stringify(data);
-  const stream = Readable.from(Buffer.from(body));
-
-  const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID;
-  if (!rootFolderId) throw new Error(
-    "GOOGLE_DRIVE_FOLDER_ID is not set. Create a Google Drive folder, share it with the service account (Editor), and add the folder ID as this env var."
-  );
-
-  // Search only within the shared root folder
-  const list = await drive.files.list({
-    q: `name='${fileName}' and '${rootFolderId}' in parents and trashed=false`,
-    fields: "files(id)",
-    spaces: "drive",
-  });
-  const existing = list.data.files?.[0];
-
-  if (existing?.id) {
-    await drive.files.update({
-      fileId: existing.id,
-      media: { mimeType: "application/json", body: stream },
-    });
-  } else {
-    await drive.files.create({
-      requestBody: { name: fileName, parents: [rootFolderId] },
-      media: { mimeType: "application/json", body: stream },
-      fields: "id",
-    });
-  }
+export async function blobUploadBuffer(
+  buffer: Buffer,
+  pathname: string,
+  contentType: string
+): Promise<string> {
+  const { put } = await import("@vercel/blob");
+  const { url } = await put(pathname, buffer, { access: "public", contentType, addRandomSuffix: false });
+  return url;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
 export async function readTournaments(): Promise<Tournament[]> {
   if (!IS_VERCEL) return readLocal();
-  const index = await driveReadJson<Tournament[]>(INDEX_NAME);
+  const index = await blobGet<Tournament[]>("tournaments/index.json");
   return index ?? [];
 }
 
 export async function getTournament(id: string): Promise<Tournament | null> {
   if (!IS_VERCEL) return readLocal().find((t) => t.id === id) ?? null;
-  const t = await driveReadJson<Tournament>(`e-cert-t-${id}.json`);
-  return t ?? null;
+  return blobGet<Tournament>(`tournaments/${id}/tournament.json`);
 }
 
 export async function saveTournament(tournament: Tournament) {
@@ -119,12 +83,14 @@ export async function saveTournament(tournament: Tournament) {
     return;
   }
 
-  // Write full tournament (with embedded files) to its own Drive file
-  await driveWriteJson(`e-cert-t-${tournament.id}.json`, tournament);
+  // Write full tournament to its own Blob file
+  await blobPut(
+    `tournaments/${tournament.id}/tournament.json`,
+    JSON.stringify(tournament)
+  );
 
   // Update the lightweight index so the list page loads fast
-  const index = (await driveReadJson<Tournament[]>(INDEX_NAME)) ?? [];
-  // Store only a lightweight summary in the index (no embedded files)
+  const index = (await blobGet<Tournament[]>("tournaments/index.json")) ?? [];
   const summary: Tournament = {
     id: tournament.id,
     name: tournament.name,
@@ -142,7 +108,7 @@ export async function saveTournament(tournament: Tournament) {
   };
   const i = index.findIndex((t) => t.id === tournament.id);
   if (i >= 0) index[i] = summary; else index.push(summary);
-  await driveWriteJson(INDEX_NAME, index);
+  await blobPut("tournaments/index.json", JSON.stringify(index));
 }
 
 // ── File storage ───────────────────────────────────────────────────────────

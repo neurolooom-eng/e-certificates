@@ -1,33 +1,16 @@
 import { NextResponse } from "next/server";
 
 export async function GET() {
-  const hasDriveKey = !!process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   const hasNextAuthSecret = !!process.env.NEXTAUTH_SECRET;
+  const hasBlobToken = !!process.env.BLOB_READ_WRITE_TOKEN;
   const isVercel = !!process.env.VERCEL;
 
-  let driveKeyValid = false;
-  let driveEmail = "";
-  if (hasDriveKey) {
-    try {
-      const parsed = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON!);
-      driveKeyValid = parsed.type === "service_account" && !!parsed.private_key;
-      driveEmail = parsed.client_email ?? "";
-    } catch {
-      driveKeyValid = false;
-    }
-  }
-
-  const hasFolderId = !!process.env.GOOGLE_DRIVE_FOLDER_ID;
-
   return NextResponse.json({
-    ok: hasDriveKey && driveKeyValid && hasNextAuthSecret && hasFolderId,
+    ok: hasNextAuthSecret && hasBlobToken,
     env: isVercel ? "vercel" : "local",
     checks: {
       NEXTAUTH_SECRET: hasNextAuthSecret,
-      GOOGLE_SERVICE_ACCOUNT_JSON: hasDriveKey,
-      driveKeyValid,
-      driveEmail,
-      GOOGLE_DRIVE_FOLDER_ID: hasFolderId,
+      BLOB_READ_WRITE_TOKEN: hasBlobToken,
     },
   });
 }
