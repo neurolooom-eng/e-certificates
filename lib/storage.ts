@@ -100,8 +100,8 @@ export async function saveTournament(tournament: Tournament) {
     templatePath: "",
     dataPath: "",
     config: tournament.config,
-    certificates: tournament.certificates.map(({ recipientName, driveLink, driveFileId, rowIndex, generatedAt }) => ({
-      recipientName, driveLink, driveFileId, rowIndex, generatedAt,
+    certificates: tournament.certificates.map(({ recipientName, driveLink, driveFileId, rowIndex, generatedAt, category }) => ({
+      recipientName, driveLink, driveFileId, rowIndex, generatedAt, category,
     })),
     driveFolderLink: tournament.driveFolderLink,
     progress: tournament.progress,

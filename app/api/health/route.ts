@@ -11,6 +11,7 @@ export async function GET() {
     checks: {
       NEXTAUTH_SECRET: hasNextAuthSecret,
       BLOB_READ_WRITE_TOKEN: hasBlobToken,
+      ANTHROPIC_API_KEY: !!process.env.ANTHROPIC_API_KEY,
     },
   });
 }

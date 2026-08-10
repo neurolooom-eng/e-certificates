@@ -15,22 +15,42 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   await saveTournament(tournament);
 
   try {
-    const [templateBuffer, xlsxBuffer] = await Promise.all([
-      readUploadedFile(tournament.templatePath),
-      readUploadedFile(tournament.dataPath),
-    ]);
+    const templateBuffer = await readUploadedFile(tournament.templatePath);
 
-    const generated = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config);
+    // Build list of { categoryName, xlsxBuffer } to process
+    const sources: { categoryName: string; xlsxBuffer: Buffer }[] = [];
 
-    tournament.progress = { current: 0, total: generated.length };
+    if (tournament.categories && tournament.categories.length > 0) {
+      for (const cat of tournament.categories) {
+        sources.push({
+          categoryName: cat.name,
+          xlsxBuffer: await readUploadedFile(cat.dataPath),
+        });
+      }
+    } else {
+      sources.push({
+        categoryName: "",
+        xlsxBuffer: await readUploadedFile(tournament.dataPath),
+      });
+    }
+
+    // Count total certificates across all categories
+    const allGenerated: Array<{ categoryName: string; cert: Awaited<ReturnType<typeof generateCertificates>>[number] }> = [];
+    for (const { categoryName, xlsxBuffer } of sources) {
+      const certs = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config);
+      for (const cert of certs) allGenerated.push({ categoryName, cert });
+    }
+
+    tournament.progress = { current: 0, total: allGenerated.length };
     await saveTournament(tournament);
 
     const certificates: Certificate[] = [];
-    for (let i = 0; i < generated.length; i++) {
-      const cert = generated[i];
+    for (let i = 0; i < allGenerated.length; i++) {
+      const { categoryName, cert } = allGenerated[i];
+      const prefix = categoryName ? `${categoryName}/` : "";
       const url = await blobUploadBuffer(
         cert.buffer,
-        `tournaments/${id}/certs/${cert.filename}`,
+        `tournaments/${id}/certs/${prefix}${cert.filename}`,
         "image/png"
       );
       certificates.push({
@@ -38,16 +58,17 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         recipientName: cert.name,
         driveFileId: "",
         driveLink: url,
+        category: categoryName || undefined,
         generatedAt: new Date().toISOString(),
       });
 
       tournament.certificates = certificates;
-      tournament.progress = { current: i + 1, total: generated.length };
+      tournament.progress = { current: i + 1, total: allGenerated.length };
       await saveTournament(tournament);
     }
 
     tournament.status = "ready";
-    tournament.progress = { current: generated.length, total: generated.length };
+    tournament.progress = { current: allGenerated.length, total: allGenerated.length };
     await saveTournament(tournament);
 
     return NextResponse.json({ status: "ready", count: certificates.length });

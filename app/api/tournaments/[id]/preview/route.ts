@@ -8,9 +8,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   if (!tournament) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   try {
+    const dataLocation = tournament.categories?.[0]?.dataPath || tournament.dataPath;
     const [templateBuffer, xlsxBuffer] = await Promise.all([
       readUploadedFile(tournament.templatePath),
-      readUploadedFile(tournament.dataPath),
+      readUploadedFile(dataLocation),
     ]);
 
     const [preview] = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config, {

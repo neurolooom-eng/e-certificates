@@ -15,14 +15,6 @@ export interface TournamentConfig {
   fields: FieldConfig[];
 }
 
-export interface Certificate {
-  rowIndex: number;
-  recipientName: string;
-  driveFileId: string;
-  driveLink: string;
-  generatedAt: string;
-}
-
 export type TournamentStatus = "draft" | "previewed" | "generating" | "ready" | "error";
 
 export interface GenerationProgress {
@@ -30,7 +22,24 @@ export interface GenerationProgress {
   total: number;
 }
 
+export interface TournamentCategory {
+  name: string;
+  dataPath: string;
+}
+
+export interface Certificate {
+  rowIndex: number;
+  recipientName: string;
+  driveFileId: string;
+  driveLink: string;
+  generatedAt: string;
+  category?: string;
+}
+
+export type EventType = "open" | "open_category" | "category";
+
 export interface Tournament {
+  eventType?: EventType;
   progress?: GenerationProgress;
   id: string;
   name: string;
@@ -39,6 +48,7 @@ export interface Tournament {
   status: TournamentStatus;
   templatePath: string;
   dataPath: string;
+  categories?: TournamentCategory[];
   config: TournamentConfig;
   certificates: Certificate[];
   driveFolderId?: string;
