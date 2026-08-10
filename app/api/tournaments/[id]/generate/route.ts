@@ -17,27 +17,36 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   try {
     const templateBuffer = await readUploadedFile(tournament.templatePath);
 
-    // Build list of { categoryName, xlsxBuffer } to process
-    const sources: { categoryName: string; xlsxBuffer: Buffer }[] = [];
+    // Build list of { categoryName, xlsxBuffer, overrides } to process
+    const sources: {
+      categoryName: string;
+      xlsxBuffer: Buffer;
+      overrides: { age?: string; gender?: string; rounds?: string };
+    }[] = [];
 
     if (tournament.categories && tournament.categories.length > 0) {
       for (const cat of tournament.categories) {
         sources.push({
           categoryName: cat.name,
           xlsxBuffer: await readUploadedFile(cat.dataPath),
+          overrides: { age: cat.age, gender: cat.gender, rounds: cat.rounds },
         });
       }
     } else {
       sources.push({
         categoryName: "",
         xlsxBuffer: await readUploadedFile(tournament.dataPath),
+        overrides: {},
       });
     }
 
     // Count total certificates across all categories
     const allGenerated: Array<{ categoryName: string; cert: Awaited<ReturnType<typeof generateCertificates>>[number] }> = [];
-    for (const { categoryName, xlsxBuffer } of sources) {
-      const certs = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config, { categoryName });
+    for (const { categoryName, xlsxBuffer, overrides } of sources) {
+      const certs = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config, {
+        categoryName,
+        metaOverrides: overrides,
+      });
       for (const cert of certs) allGenerated.push({ categoryName, cert });
     }
 

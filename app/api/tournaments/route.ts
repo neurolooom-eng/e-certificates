@@ -42,7 +42,8 @@ export async function POST(request: Request) {
   let dataPath = "";
 
   if (categoriesJson) {
-    const categoryMeta: { name: string }[] = JSON.parse(categoriesJson);
+    const categoryMeta: { name: string; age?: string; gender?: string; rounds?: string }[] =
+      JSON.parse(categoriesJson);
     categories = [];
     for (let i = 0; i < categoryMeta.length; i++) {
       const file = formData.get(`categoryData_${i}`) as File | null;
@@ -54,7 +55,13 @@ export async function POST(request: Request) {
       } else {
         path = await saveUploadedFile(buf, id, `category_${i}_${file.name}`);
       }
-      categories.push({ name: categoryMeta[i].name, dataPath: path });
+      categories.push({
+        name: categoryMeta[i].name,
+        dataPath: path,
+        age: categoryMeta[i].age || undefined,
+        gender: categoryMeta[i].gender || undefined,
+        rounds: categoryMeta[i].rounds || undefined,
+      });
     }
     if (categories.length === 0) {
       return NextResponse.json({ error: "At least one category with a data file is required." }, { status: 400 });

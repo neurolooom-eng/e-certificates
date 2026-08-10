@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 import TemplateDesigner from "@/components/TemplateDesigner";
+import { metaFromRows, detectHeaderRow, mapColumns } from "@/lib/sheet-meta";
 import type { FieldConfig, TournamentConfig } from "@/lib/types";
 
 const DEFAULT_FIELDS: FieldConfig[] = [
@@ -78,54 +79,106 @@ function FieldEditor({
           </select>
         </div>
 
-        {isTick ? (
-          <>
+        {/* Where the value comes from */}
+        <div className={isTick ? "" : "col-span-2"}>
+          <label className="block text-xs text-gray-500 mb-1">
+            {isTick ? "Tick when this…" : "Value from"}
+          </label>
+          <select
+            className="w-full border rounded px-2 py-1.5 text-sm"
+            value={field.source === "meta" ? `meta:${field.metaKey ?? "category"}` : "column"}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === "column") {
+                onChange({ ...field, source: "column", metaKey: undefined });
+              } else {
+                onChange({
+                  ...field,
+                  source: "meta",
+                  metaKey: v.slice(5) as FieldConfig["metaKey"],
+                });
+              }
+            }}
+          >
+            <option value="column">Spreadsheet column (per participant)</option>
+            <option value="meta:category">Category — e.g. &quot;Under 8 Boys&quot;</option>
+            <option value="meta:age">Age group — e.g. &quot;8&quot;</option>
+            <option value="meta:gender">Gender — Boys / Girls / Open</option>
+            <option value="meta:rounds">Number of rounds — e.g. &quot;6&quot;</option>
+            <option value="meta:title">Tournament title from the sheet</option>
+          </select>
+        </div>
+
+        {field.source === "meta" ? (
+          isTick ? (
             <div>
-              <label className="block text-xs text-gray-500 mb-1">Tick when this matches</label>
-              <select
-                className="w-full border rounded px-2 py-1.5 text-sm"
-                value={field.columnIndex}
-                onChange={(e) => set("columnIndex", Number(e.target.value))}
-              >
-                <option value={-1}>The category name</option>
-                {columns.map((c, i) => (
-                  <option key={i} value={i}>{i}: {c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">Equals this value</label>
+              <label className="block text-xs text-gray-500 mb-1">…equals this value</label>
               <input
                 className="w-full border rounded px-2 py-1.5 text-sm"
-                placeholder="e.g. U10 Boys — blank = always tick"
+                placeholder="e.g. 8 — blank = always tick"
                 value={field.matchValue ?? ""}
                 onChange={(e) => set("matchValue", e.target.value)}
               />
             </div>
-          </>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Prefix</label>
+                <input
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                  placeholder="e.g. &quot;after &quot;"
+                  value={field.prefix ?? ""}
+                  onChange={(e) => set("prefix", e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">Suffix</label>
+                <input
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                  placeholder="e.g. &quot; Rounds&quot;"
+                  value={field.suffix ?? ""}
+                  onChange={(e) => set("suffix", e.target.value)}
+                />
+              </div>
+            </>
+          )
         ) : (
-          <div className="col-span-2">
-            <label className="block text-xs text-gray-500 mb-1">Spreadsheet Column</label>
-            {columns.length > 0 ? (
-              <select
-                className="w-full border rounded px-2 py-1.5 text-sm"
-                value={field.columnIndex}
-                onChange={(e) => set("columnIndex", Number(e.target.value))}
-              >
-                {columns.map((c, i) => (
-                  <option key={i} value={i}>{i}: {c}</option>
-                ))}
-              </select>
-            ) : (
-              <input
-                type="number"
-                className="w-full border rounded px-2 py-1.5 text-sm"
-                value={field.columnIndex}
-                onChange={(e) => set("columnIndex", Number(e.target.value))}
-                placeholder="Column index (0-based)"
-              />
+          <>
+            <div className={isTick ? "" : "col-span-2"}>
+              <label className="block text-xs text-gray-500 mb-1">Spreadsheet Column</label>
+              {columns.length > 0 ? (
+                <select
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                  value={field.columnIndex}
+                  onChange={(e) => set("columnIndex", Number(e.target.value))}
+                >
+                  {isTick && <option value={-1}>The category name</option>}
+                  {columns.map((c, i) => (
+                    <option key={i} value={i}>{i}: {c}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="number"
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                  value={field.columnIndex}
+                  onChange={(e) => set("columnIndex", Number(e.target.value))}
+                  placeholder="Column index (0-based)"
+                />
+              )}
+            </div>
+            {isTick && (
+              <div>
+                <label className="block text-xs text-gray-500 mb-1">…equals this value</label>
+                <input
+                  className="w-full border rounded px-2 py-1.5 text-sm"
+                  placeholder="blank = always tick"
+                  value={field.matchValue ?? ""}
+                  onChange={(e) => set("matchValue", e.target.value)}
+                />
+              </div>
             )}
-          </div>
+          </>
         )}
 
         <div>
@@ -186,6 +239,11 @@ interface CategoryEntry {
   id: string;
   name: string;
   file: File | null;
+  /** Parsed from the sheet header; editable by the organiser. */
+  age: string;
+  gender: string;
+  rounds: string;
+  autoFilled: boolean;
 }
 
 type EventType = "open" | "open_category" | "category";
@@ -200,7 +258,7 @@ export default function NewTournamentPage() {
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [templateSizeKb, setTemplateSizeKb] = useState<number | null>(null);
   const [categories, setCategories] = useState<CategoryEntry[]>([
-    { id: `cat_${Date.now()}`, name: "", file: null },
+    { id: `cat_${Date.now()}`, name: "", file: null, age: "", gender: "", rounds: "", autoFilled: false },
   ]);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
   const [textColor, setTextColor] = useState("#8B1E1E");
@@ -214,6 +272,7 @@ export default function NewTournamentPage() {
   // Visual designer + live preview
   const [templateUrl, setTemplateUrl] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [previewCatId, setPreviewCatId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
   const [previewing, setPreviewing] = useState(false);
@@ -227,8 +286,9 @@ export default function NewTournamentPage() {
     return () => URL.revokeObjectURL(url);
   }, [templateFile]);
 
-  async function handleDraftPreview() {
-    const firstWithFile = categories.find((c) => c.file);
+  async function handleDraftPreview(catId?: string) {
+    const firstWithFile = categories.find((c) => c.id === (catId ?? previewCatId) && c.file)
+      ?? categories.find((c) => c.file);
     if (!templateFile || !firstWithFile?.file) {
       setPreviewError("Upload the template and at least one participant list first.");
       return;
@@ -240,6 +300,11 @@ export default function NewTournamentPage() {
     fd.append("template", templateFile);
     fd.append("data", firstWithFile.file);
     fd.append("categoryName", firstWithFile.name.trim() || "Open");
+    fd.append("metaOverrides", JSON.stringify({
+      age: firstWithFile.age,
+      gender: firstWithFile.gender,
+      rounds: firstWithFile.rounds,
+    }));
     fd.append("config", JSON.stringify({ headerRowIndex, textColor, fields }));
 
     try {
@@ -330,14 +395,58 @@ export default function NewTournamentPage() {
 
   function handleCategoryFile(catId: string, file: File) {
     setCategories((prev) => prev.map((c) => (c.id === catId ? { ...c, file } : c)));
-    // Read columns from the first uploaded file for the field editors
     const reader = new FileReader();
     reader.onload = (e) => {
       const wb = XLSX.read(e.target?.result, { type: "array" });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1 }) as string[][];
-      const headerRow = rows[headerRowIndex] || rows[0] || [];
-      setColumns(headerRow.map(String));
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 }) as unknown[][];
+
+      // Results exports have several lines of text above the table — find the
+      // real header row instead of assuming row 0.
+      const detectedHeader = detectHeaderRow(rows);
+      const headerIdx = detectedHeader || headerRowIndex;
+      if (detectedHeader) setHeaderRowIndex(detectedHeader);
+
+      const headerRow = (rows[headerIdx] || rows[0] || []) as unknown[];
+      setColumns(headerRow.map((c) => String(c ?? "")));
+
+      // Point the standard fields at the right columns automatically
+      const mapped = mapColumns(headerRow);
+      if (mapped.length > 0) {
+        const byKey = Object.fromEntries(mapped.map((m) => [m.key, m.columnIndex]));
+        setFields((prev) =>
+          prev.map((f) => {
+            if (f.source === "meta") return f;
+            const idx =
+              f.id === "name" ? byKey.name
+              : f.id === "org" ? byKey.club
+              : f.id === "pts" ? byKey.points
+              : f.id === "place" ? byKey.rank
+              : undefined;
+            return idx === undefined ? f : { ...f, columnIndex: idx };
+          })
+        );
+        setDetectMsg(
+          `✓ Read the sheet: header on row ${headerIdx}, mapped ${mapped.length} columns automatically.`
+        );
+      }
+
+      // Category / rounds parsed straight out of the sheet's header text
+      const meta = metaFromRows(rows, headerIdx);
+      setCategories((prev) =>
+        prev.map((c) =>
+          c.id === catId
+            ? {
+                ...c,
+                age: c.age || meta.age,
+                gender: c.gender || meta.gender,
+                rounds: c.rounds || meta.rounds,
+                name: c.name || meta.category,
+                autoFilled: !!(meta.age || meta.gender || meta.rounds),
+              }
+            : c
+        )
+      );
     };
     reader.readAsArrayBuffer(file);
   }
@@ -361,7 +470,12 @@ export default function NewTournamentPage() {
     fd.append("eventDate", eventDate);
     fd.append("eventType", eventType);
     fd.append("template", templateFile);
-    fd.append("categories", JSON.stringify(validCategories.map((c) => ({ name: c.name.trim() }))));
+    fd.append("categories", JSON.stringify(validCategories.map((c) => ({
+      name: c.name.trim(),
+      age: c.age,
+      gender: c.gender,
+      rounds: c.rounds,
+    }))));
     validCategories.forEach((c, i) => fd.append(`categoryData_${i}`, c.file!));
     fd.append("config", JSON.stringify(config));
 
@@ -431,7 +545,7 @@ export default function NewTournamentPage() {
                   const t = e.target.value as EventType;
                   setEventType(t);
                   if (t === "open") {
-                    setCategories((prev) => [{ ...(prev[0] ?? { id: `cat_${Date.now()}`, file: null }), name: "Open" }]);
+                    setCategories((prev) => [{ ...(prev[0] ?? { id: `cat_${Date.now()}`, file: null, age: "", gender: "", rounds: "", autoFilled: false }), name: "Open" }]);
                   }
                 }}
               >
@@ -497,7 +611,7 @@ export default function NewTournamentPage() {
               {eventType !== "open" && (
                 <button
                   type="button"
-                  onClick={() => setCategories([...categories, { id: `cat_${Date.now()}`, name: "", file: null }])}
+                  onClick={() => setCategories([...categories, { id: `cat_${Date.now()}`, name: "", file: null, age: "", gender: "", rounds: "", autoFilled: false }])}
                   className="text-sm text-brand-500 hover:text-brand-600 font-medium"
                 >
                   + Add Category
@@ -510,42 +624,90 @@ export default function NewTournamentPage() {
                 : "Each category has its own participant Excel (.xlsx). All use the same certificate template."}
             </p>
             <div className="space-y-3">
-              {categories.map((cat) => (
-                <div key={cat.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-gray-50">
-                  {eventType !== "open" && (
-                    <input
-                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44 shrink-0"
-                      placeholder="e.g. Under 10 Open"
-                      value={cat.name}
-                      onChange={(e) =>
-                        setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, name: e.target.value } : c)))
-                      }
-                    />
-                  )}
-                  <label className="flex-1 border-2 border-dashed border-gray-300 rounded-lg px-3 py-2 text-center cursor-pointer hover:border-brand-500 transition-colors">
-                    {cat.file ? (
-                      <span className="text-sm text-green-600">✓ {cat.file.name}</span>
-                    ) : (
-                      <span className="text-sm text-gray-400">Upload .xlsx</span>
+              {categories.map((cat) => {
+                const setCat = (patch: Partial<CategoryEntry>) =>
+                  setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, ...patch } : c)));
+                return (
+                  <div key={cat.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                    <div className="flex items-center gap-3">
+                      {eventType !== "open" && (
+                        <input
+                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44 shrink-0"
+                          placeholder="e.g. Under 10 Open"
+                          value={cat.name}
+                          onChange={(e) => setCat({ name: e.target.value })}
+                        />
+                      )}
+                      <label className="flex-1 border-2 border-dashed border-gray-300 rounded-lg px-3 py-2 text-center cursor-pointer hover:border-brand-500 transition-colors">
+                        {cat.file ? (
+                          <span className="text-sm text-green-600">✓ {cat.file.name}</span>
+                        ) : (
+                          <span className="text-sm text-gray-400">Upload .xlsx</span>
+                        )}
+                        <input
+                          type="file"
+                          accept=".xlsx,.xls"
+                          className="hidden"
+                          onChange={(e) => e.target.files?.[0] && handleCategoryFile(cat.id, e.target.files[0])}
+                        />
+                      </label>
+                      {eventType !== "open" && categories.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setCategories((prev) => prev.filter((c) => c.id !== cat.id))}
+                          className="text-red-400 hover:text-red-600 text-sm shrink-0"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Category details — auto-read from the sheet header, editable */}
+                    {cat.file && (
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        <p className="text-xs text-gray-500 mb-2">
+                          {cat.autoFilled
+                            ? "✓ Read from the sheet header — edit if anything is wrong."
+                            : "Couldn't read these from the sheet — fill them in manually."}
+                        </p>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Age group</label>
+                            <input
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                              placeholder="8"
+                              value={cat.age}
+                              onChange={(e) => setCat({ age: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Gender</label>
+                            <select
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                              value={cat.gender}
+                              onChange={(e) => setCat({ gender: e.target.value })}
+                            >
+                              <option value="">—</option>
+                              <option value="Boys">Boys</option>
+                              <option value="Girls">Girls</option>
+                              <option value="Open">Open</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs text-gray-500 mb-1">Rounds</label>
+                            <input
+                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
+                              placeholder="6"
+                              value={cat.rounds}
+                              onChange={(e) => setCat({ rounds: e.target.value })}
+                            />
+                          </div>
+                        </div>
+                      </div>
                     )}
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={(e) => e.target.files?.[0] && handleCategoryFile(cat.id, e.target.files[0])}
-                    />
-                  </label>
-                  {eventType !== "open" && categories.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setCategories((prev) => prev.filter((c) => c.id !== cat.id))}
-                      className="text-red-400 hover:text-red-600 text-sm shrink-0"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -683,17 +845,31 @@ export default function NewTournamentPage() {
                   re-render as many times as you like.
                 </p>
               </div>
+              <div className="flex items-center gap-2 shrink-0 ml-4">
+              {categories.filter((c) => c.file).length > 1 && (
+                <select
+                  value={previewCatId ?? ""}
+                  onChange={(e) => { setPreviewCatId(e.target.value); handleDraftPreview(e.target.value); }}
+                  className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
+                >
+                  <option value="">First category</option>
+                  {categories.filter((c) => c.file).map((c) => (
+                    <option key={c.id} value={c.id}>{c.name || "Unnamed"}</option>
+                  ))}
+                </select>
+              )}
               <button
                 type="button"
-                onClick={handleDraftPreview}
+                onClick={() => handleDraftPreview()}
                 disabled={previewing || !templateFile || !categories.some((c) => c.file)}
-                className="shrink-0 ml-4 px-4 py-2 border border-brand-500 text-brand-500 hover:bg-brand-50 disabled:opacity-40 rounded-lg text-sm font-medium flex items-center gap-2"
+                className="px-4 py-2 border border-brand-500 text-brand-500 hover:bg-brand-50 disabled:opacity-40 rounded-lg text-sm font-medium flex items-center gap-2"
               >
                 {previewing && (
                   <span className="inline-block w-3.5 h-3.5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
                 )}
                 {previewing ? "Rendering…" : previewUrl ? "Re-render Preview" : "Render Preview"}
               </button>
+              </div>
             </div>
             {previewError && <p className="text-red-600 text-sm mt-2">{previewError}</p>}
             {previewUrl && (
