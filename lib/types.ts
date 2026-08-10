@@ -15,6 +15,17 @@ export interface FieldConfig {
   matchValue?: string;
   /** Box height in px — used by the visual designer and to centre ticks. */
   boxHeight?: number;
+  /**
+   * Where the value comes from. "column" reads the participant's row;
+   * "meta" reads tournament/category metadata parsed from the sheet header
+   * (or overridden by the organiser) — the same for every row in a category.
+   */
+  source?: "column" | "meta";
+  /** Which metadata value to use when source is "meta". */
+  metaKey?: "category" | "age" | "gender" | "rounds" | "title";
+  /** Literal text placed before/after the value, e.g. "Rounds: " or " Rounds". */
+  prefix?: string;
+  suffix?: string;
 }
 
 export interface TournamentConfig {
@@ -33,6 +44,10 @@ export interface GenerationProgress {
 export interface TournamentCategory {
   name: string;
   dataPath: string;
+  /** Organiser overrides — blank means "use what was parsed from the sheet". */
+  age?: string;
+  gender?: string;
+  rounds?: string;
 }
 
 export interface Certificate {

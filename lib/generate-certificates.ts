@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import path from "path";
 import fs from "fs";
 import type { TournamentConfig, FieldConfig } from "./types";
+import { metaFromRows, metaValue, EMPTY_META, type SheetMeta } from "./sheet-meta";
 
 // Approximate bold sans-serif character widths relative to font-size.
 // Good enough for auto-shrink; avoids needing a native font engine.
@@ -27,7 +28,11 @@ function ordinal(n: number): string {
 
 function formatValue(raw: unknown, fmt: FieldConfig["format"]): string {
   if (raw === null || raw === undefined || raw === "") return "";
-  if (fmt === "ordinal") return ordinal(Number(raw));
+  if (fmt === "ordinal") {
+    const n = Number(raw);
+    // Non-numeric input would render as "NaNth" — leave the blank empty instead
+    return isNaN(n) ? "" : ordinal(n);
+  }
   if (fmt === "number") {
     const f = parseFloat(String(raw));
     return isNaN(f) ? String(raw) : f === Math.floor(f) ? String(Math.floor(f)) : String(f);
@@ -84,6 +89,14 @@ function buildSvgOverlay(
   return Buffer.from(svg);
 }
 
+/** Parse the sheet's header rows into category metadata. */
+export function readSheetMeta(xlsxBuffer: Buffer, headerRowIndex: number): SheetMeta {
+  const wb = XLSX.read(xlsxBuffer, { type: "buffer" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const all = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1 }) as unknown[][];
+  return metaFromRows(all, headerRowIndex);
+}
+
 function loadRows(xlsxBuffer: Buffer, headerRowIndex: number): Record<number, unknown>[] {
   const wb = XLSX.read(xlsxBuffer, { type: "buffer" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -114,17 +127,32 @@ export async function generateCertificates(
   templateBuffer: Buffer,
   xlsxBuffer: Buffer,
   config: TournamentConfig,
-  options: { previewOnly?: boolean; categoryName?: string } = {}
+  options: {
+    previewOnly?: boolean;
+    categoryName?: string;
+    /** Organiser overrides; blank values fall back to what the sheet says. */
+    metaOverrides?: Partial<SheetMeta>;
+  } = {}
 ): Promise<GeneratedCertificate[]> {
-  const meta = await sharp(templateBuffer).metadata();
-  const width = meta.width!;
-  const height = meta.height!;
+  const imageMeta = await sharp(templateBuffer).metadata();
+  const width = imageMeta.width!;
+  const height = imageMeta.height!;
+
+  // Category metadata: parsed from the sheet header, then overridden
+  const meta: SheetMeta = { ...EMPTY_META, ...readSheetMeta(xlsxBuffer, config.headerRowIndex) };
+  for (const [k, v] of Object.entries(options.metaOverrides ?? {})) {
+    if (v) (meta as unknown as Record<string, string>)[k] = String(v);
+  }
+  if (options.categoryName && !options.metaOverrides?.category) {
+    meta.category = options.categoryName;
+  }
 
   let rows = loadRows(xlsxBuffer, config.headerRowIndex);
 
   if (options.previewOnly) {
     // Pick the row with the longest name field
-    const nameField = config.fields.find((f) => f.format === "text") ?? config.fields[0];
+    const nameField =
+      config.fields.find((f) => f.format === "text" && f.source !== "meta") ?? config.fields[0];
     let maxLen = -1, maxIdx = 0;
     rows.forEach((row, i) => {
       const len = String(row[nameField.columnIndex] ?? "").length;
@@ -141,20 +169,24 @@ export async function generateCertificates(
     let recipientName = "";
 
     for (const field of config.fields) {
+      // Where does this field's raw value come from?
+      const raw: unknown =
+        field.source === "meta"
+          ? metaValue(meta, field.metaKey)
+          : field.columnIndex >= 0
+          ? row[field.columnIndex]
+          : options.categoryName ?? meta.category;
+
       if (field.format === "tick") {
-        // Compare against the row cell, or the category name when the field
-        // has no column mapped (columnIndex < 0).
-        const source = field.columnIndex >= 0
-          ? String(row[field.columnIndex] ?? "")
-          : (options.categoryName ?? "");
         const want = (field.matchValue ?? "").trim().toLowerCase();
-        const got = source.trim().toLowerCase();
+        const got = String(raw ?? "").trim().toLowerCase();
         values[field.id] = !want || got === want ? "1" : "";
         continue;
       }
-      const text = formatValue(row[field.columnIndex], field.format);
-      values[field.id] = text;
-      if (field.format === "text" && !recipientName) recipientName = text;
+
+      const text = formatValue(raw, field.format);
+      values[field.id] = text ? `${field.prefix ?? ""}${text}${field.suffix ?? ""}` : "";
+      if (field.format === "text" && field.source !== "meta" && !recipientName) recipientName = text;
     }
 
     const svgOverlay = buildSvgOverlay(width, height, config.fields, values, config.textColor);

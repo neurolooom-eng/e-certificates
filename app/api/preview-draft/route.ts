@@ -16,6 +16,7 @@ export async function POST(request: Request) {
     const dataFile = formData.get("data") as File | null;
     const configJson = formData.get("config") as string | null;
     const categoryName = (formData.get("categoryName") as string) || undefined;
+    const overridesJson = formData.get("metaOverrides") as string | null;
 
     if (!templateFile || !dataFile || !configJson) {
       return NextResponse.json(
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
     const [preview] = await generateCertificates(templateBuffer, xlsxBuffer, config, {
       previewOnly: true,
       categoryName,
+      metaOverrides: overridesJson ? JSON.parse(overridesJson) : undefined,
     });
 
     if (!preview) {
