@@ -40,6 +40,7 @@ export type EventType = "open" | "open_category" | "category";
 
 export interface Tournament {
   eventType?: EventType;
+  archived?: boolean;
   progress?: GenerationProgress;
   id: string;
   name: string;

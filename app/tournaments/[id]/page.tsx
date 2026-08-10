@@ -124,11 +124,39 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
               })}
             </p>
           </div>
-          <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLOR[status]}`}>
-            {status}
-          </span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className={`px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLOR[status]}`}>
+              {status}
+            </span>
+            {tournament.archived && (
+              <span className="px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-500">
+                archived
+              </span>
+            )}
+          </div>
         </div>
       </div>
+
+      {tournament.archived && (
+        <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-6 flex items-center justify-between">
+          <p className="text-sm text-gray-600">
+            This tournament is archived — it's hidden from the active list. Certificate links still work.
+          </p>
+          <button
+            onClick={async () => {
+              await fetch(`/api/tournaments/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ archived: false }),
+              });
+              fetchTournament();
+            }}
+            className="text-sm text-brand-500 hover:text-brand-600 font-medium shrink-0 ml-4"
+          >
+            ↩ Restore
+          </button>
+        </div>
+      )}
 
       {/* ── Step flow (only shown before ready) ── */}
       {!isReady && (

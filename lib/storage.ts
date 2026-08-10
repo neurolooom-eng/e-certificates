@@ -105,10 +105,41 @@ export async function saveTournament(tournament: Tournament) {
     })),
     driveFolderLink: tournament.driveFolderLink,
     progress: tournament.progress,
+    eventType: tournament.eventType,
+    archived: tournament.archived,
   };
   const i = index.findIndex((t) => t.id === tournament.id);
   if (i >= 0) index[i] = summary; else index.push(summary);
   await blobPut("tournaments/index.json", JSON.stringify(index));
+}
+
+/**
+ * Permanently delete a tournament: its metadata, uploaded files, and every
+ * generated certificate. Also removes it from the index.
+ */
+export async function deleteTournament(id: string): Promise<boolean> {
+  if (!IS_VERCEL) {
+    const all = readLocal();
+    const next = all.filter((t) => t.id !== id);
+    if (next.length === all.length) return false;
+    writeLocal(next);
+    const dir = path.join(process.cwd(), "uploads", id);
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  }
+
+  const { list, del } = await import("@vercel/blob");
+
+  // Delete every blob under this tournament's prefix (metadata + certificates)
+  const { blobs } = await list({ prefix: `tournaments/${id}/` });
+  if (blobs.length > 0) await del(blobs.map((b) => b.url));
+
+  // Remove from the index
+  const index = (await blobGet<Tournament[]>("tournaments/index.json")) ?? [];
+  const next = index.filter((t) => t.id !== id);
+  await blobPut("tournaments/index.json", JSON.stringify(next));
+
+  return blobs.length > 0 || next.length !== index.length;
 }
 
 // ── File storage ───────────────────────────────────────────────────────────
