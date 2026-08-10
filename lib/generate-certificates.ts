@@ -1,6 +1,6 @@
 import sharp from "sharp";
 import * as XLSX from "xlsx";
-import opentype from "opentype.js";
+import * as opentype from "opentype.js";
 import path from "path";
 import fs from "fs";
 import type { TournamentConfig, FieldConfig } from "./types";
