@@ -38,7 +38,7 @@ function writeLocal(t: Tournament[]) {
 
 async function blobPut(pathname: string, data: string | Buffer, contentType = "application/json") {
   const { put } = await import("@vercel/blob");
-  await put(pathname, data, { access: "public", contentType, addRandomSuffix: false });
+  await put(pathname, data, { access: "public", contentType, addRandomSuffix: false, allowOverwrite: true });
 }
 
 async function blobGet<T>(pathname: string): Promise<T | null> {
