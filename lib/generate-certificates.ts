@@ -56,6 +56,18 @@ function buildSvgOverlay(
 
   const texts = fields.map((f) => {
     const text = values[f.id] ?? "";
+
+    if (f.format === "tick") {
+      // values[f.id] is "1" when the tick should be drawn, "" otherwise
+      if (text !== "1") return "";
+      const size = f.fontSize;
+      const cx = f.centerX;
+      const cy = f.topY + (f.boxHeight ?? size) / 2;
+      // Checkmark stroke: down-left → bottom → up-right
+      const d = `M ${cx - size * 0.35} ${cy} L ${cx - size * 0.1} ${cy + size * 0.28} L ${cx + size * 0.38} ${cy - size * 0.3}`;
+      return `<path d="${d}" fill="none" stroke="${fill}" stroke-width="${Math.max(2, size * 0.14)}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    }
+
     const fs = fitFontSize(text, f.maxWidth, f.fontSize);
     // SVG text-anchor="middle" handles horizontal centering; y is top + ascender
     const ascender = fs * 0.8;
@@ -102,7 +114,7 @@ export async function generateCertificates(
   templateBuffer: Buffer,
   xlsxBuffer: Buffer,
   config: TournamentConfig,
-  options: { previewOnly?: boolean } = {}
+  options: { previewOnly?: boolean; categoryName?: string } = {}
 ): Promise<GeneratedCertificate[]> {
   const meta = await sharp(templateBuffer).metadata();
   const width = meta.width!;
@@ -129,6 +141,17 @@ export async function generateCertificates(
     let recipientName = "";
 
     for (const field of config.fields) {
+      if (field.format === "tick") {
+        // Compare against the row cell, or the category name when the field
+        // has no column mapped (columnIndex < 0).
+        const source = field.columnIndex >= 0
+          ? String(row[field.columnIndex] ?? "")
+          : (options.categoryName ?? "");
+        const want = (field.matchValue ?? "").trim().toLowerCase();
+        const got = source.trim().toLowerCase();
+        values[field.id] = !want || got === want ? "1" : "";
+        continue;
+      }
       const text = formatValue(row[field.columnIndex], field.format);
       values[field.id] = text;
       if (field.format === "text" && !recipientName) recipientName = text;
