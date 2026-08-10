@@ -5,5 +5,10 @@ export default withAuth({
 });
 
 export const config = {
-  matcher: ["/tournaments/:path*", "/api/tournaments/:path*"],
+  matcher: [
+    "/tournaments/:path*",
+    "/api/tournaments/:path*",
+    "/api/preview-draft",
+    "/api/detect-placement",
+  ],
 };

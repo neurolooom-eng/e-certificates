@@ -6,7 +6,15 @@ export interface FieldConfig {
   topY: number;
   maxWidth: number;
   fontSize: number;
-  format: "text" | "number" | "ordinal";
+  /**
+   * "tick" draws a checkmark instead of text. It is drawn only when the value
+   * in `columnIndex` matches `matchValue` (case-insensitive). Leave matchValue
+   * empty to always draw the tick.
+   */
+  format: "text" | "number" | "ordinal" | "tick";
+  matchValue?: string;
+  /** Box height in px — used by the visual designer and to centre ticks. */
+  boxHeight?: number;
 }
 
 export interface TournamentConfig {

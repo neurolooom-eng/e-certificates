@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
+import TemplateDesigner from "@/components/TemplateDesigner";
 import type { FieldConfig, TournamentConfig } from "@/lib/types";
 
 const DEFAULT_FIELDS: FieldConfig[] = [
@@ -16,23 +17,43 @@ function FieldEditor({
   field,
   index,
   columns,
+  selected,
+  onSelect,
   onChange,
   onRemove,
 }: {
   field: FieldConfig;
   index: number;
   columns: string[];
+  selected: boolean;
+  onSelect: () => void;
   onChange: (f: FieldConfig) => void;
   onRemove: () => void;
 }) {
   const set = (k: keyof FieldConfig, v: string | number) =>
     onChange({ ...field, [k]: v });
 
+  const isTick = field.format === "tick";
+
   return (
-    <div className="border border-gray-200 rounded-lg p-4 bg-gray-50">
+    <div
+      onClick={onSelect}
+      className={`border rounded-lg p-4 cursor-pointer transition-colors ${
+        selected ? "border-brand-500 bg-brand-50 ring-1 ring-brand-500" : "border-gray-200 bg-gray-50"
+      }`}
+    >
       <div className="flex items-center justify-between mb-3">
-        <span className="font-medium text-sm text-gray-700">Field {index + 1}</span>
-        <button onClick={onRemove} className="text-red-400 hover:text-red-600 text-sm">Remove</button>
+        <span className="font-medium text-sm text-gray-700">
+          {isTick ? "✓ " : ""}
+          {field.label || `Field ${index + 1}`}
+        </span>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+          className="text-red-400 hover:text-red-600 text-sm"
+        >
+          Remove
+        </button>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
@@ -44,29 +65,7 @@ function FieldEditor({
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Spreadsheet Column</label>
-          {columns.length > 0 ? (
-            <select
-              className="w-full border rounded px-2 py-1.5 text-sm"
-              value={field.columnIndex}
-              onChange={(e) => set("columnIndex", Number(e.target.value))}
-            >
-              {columns.map((c, i) => (
-                <option key={i} value={i}>{i}: {c}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              type="number"
-              className="w-full border rounded px-2 py-1.5 text-sm"
-              value={field.columnIndex}
-              onChange={(e) => set("columnIndex", Number(e.target.value))}
-              placeholder="Column index (0-based)"
-            />
-          )}
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Format</label>
+          <label className="block text-xs text-gray-500 mb-1">Type</label>
           <select
             className="w-full border rounded px-2 py-1.5 text-sm"
             value={field.format}
@@ -75,15 +74,78 @@ function FieldEditor({
             <option value="text">Text</option>
             <option value="number">Number (strip .0)</option>
             <option value="ordinal">Ordinal (1st, 2nd…)</option>
+            <option value="tick">✓ Tick / Checkbox</option>
           </select>
         </div>
+
+        {isTick ? (
+          <>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Tick when this matches</label>
+              <select
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                value={field.columnIndex}
+                onChange={(e) => set("columnIndex", Number(e.target.value))}
+              >
+                <option value={-1}>The category name</option>
+                {columns.map((c, i) => (
+                  <option key={i} value={i}>{i}: {c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Equals this value</label>
+              <input
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                placeholder="e.g. U10 Boys — blank = always tick"
+                value={field.matchValue ?? ""}
+                onChange={(e) => set("matchValue", e.target.value)}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="col-span-2">
+            <label className="block text-xs text-gray-500 mb-1">Spreadsheet Column</label>
+            {columns.length > 0 ? (
+              <select
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                value={field.columnIndex}
+                onChange={(e) => set("columnIndex", Number(e.target.value))}
+              >
+                {columns.map((c, i) => (
+                  <option key={i} value={i}>{i}: {c}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="number"
+                className="w-full border rounded px-2 py-1.5 text-sm"
+                value={field.columnIndex}
+                onChange={(e) => set("columnIndex", Number(e.target.value))}
+                placeholder="Column index (0-based)"
+              />
+            )}
+          </div>
+        )}
+
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Font Size (px)</label>
+          <label className="block text-xs text-gray-500 mb-1">
+            {isTick ? "Tick Size (px)" : "Font Size (px)"}
+          </label>
           <input
             type="number"
             className="w-full border rounded px-2 py-1.5 text-sm"
             value={field.fontSize}
             onChange={(e) => set("fontSize", Number(e.target.value))}
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Box Height (px)</label>
+          <input
+            type="number"
+            className="w-full border rounded px-2 py-1.5 text-sm"
+            value={field.boxHeight ?? Math.round(field.fontSize * 1.4)}
+            onChange={(e) => set("boxHeight", Number(e.target.value))}
           />
         </div>
         <div>
@@ -104,8 +166,10 @@ function FieldEditor({
             onChange={(e) => set("topY", Number(e.target.value))}
           />
         </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">Max Width (px)</label>
+        <div className="col-span-2">
+          <label className="block text-xs text-gray-500 mb-1">
+            {isTick ? "Box Width (px)" : "Max Width (px)"}
+          </label>
           <input
             type="number"
             className="w-full border rounded px-2 py-1.5 text-sm"
@@ -146,6 +210,54 @@ export default function NewTournamentPage() {
   const [submitStep, setSubmitStep] = useState("");
   const [error, setError] = useState("");
   const templateRef = useRef<HTMLInputElement>(null);
+
+  // Visual designer + live preview
+  const [templateUrl, setTemplateUrl] = useState<string | null>(null);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewName, setPreviewName] = useState("");
+  const [previewing, setPreviewing] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+
+  // Keep an object URL for the uploaded template so the designer can show it
+  useEffect(() => {
+    if (!templateFile) { setTemplateUrl(null); return; }
+    const url = URL.createObjectURL(templateFile);
+    setTemplateUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [templateFile]);
+
+  async function handleDraftPreview() {
+    const firstWithFile = categories.find((c) => c.file);
+    if (!templateFile || !firstWithFile?.file) {
+      setPreviewError("Upload the template and at least one participant list first.");
+      return;
+    }
+    setPreviewing(true);
+    setPreviewError("");
+
+    const fd = new FormData();
+    fd.append("template", templateFile);
+    fd.append("data", firstWithFile.file);
+    fd.append("categoryName", firstWithFile.name.trim() || "Open");
+    fd.append("config", JSON.stringify({ headerRowIndex, textColor, fields }));
+
+    try {
+      const res = await fetch("/api/preview-draft", { method: "POST", body: fd });
+      if (res.ok) {
+        const blob = await res.blob();
+        setPreviewUrl((old) => { if (old) URL.revokeObjectURL(old); return URL.createObjectURL(blob); });
+        const n = res.headers.get("X-Recipient-Name");
+        setPreviewName(n ? decodeURIComponent(n) : "");
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setPreviewError(body.error || "Preview failed.");
+      }
+    } catch (err: unknown) {
+      setPreviewError(err instanceof Error ? err.message : String(err));
+    }
+    setPreviewing(false);
+  }
 
   // Compress + resize template image client-side to stay under Vercel's 4.5MB body limit
   function compressImage(file: File): Promise<File> {
@@ -288,7 +400,7 @@ export default function NewTournamentPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-5xl mx-auto">
       <div className="mb-6">
         <a href="/tournaments" className="text-sm text-gray-500 hover:text-gray-700">← Back to tournaments</a>
         <h1 className="text-2xl font-bold text-gray-900 mt-2">Create New Tournament</h1>
@@ -496,16 +608,114 @@ export default function NewTournamentPage() {
               }
               className="text-sm text-brand-500 hover:text-brand-600 font-medium"
             >
-              + Add Field
+              + Text
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                const id = `tick_${Date.now()}`;
+                setFields([...fields, {
+                  id,
+                  label: "Tick Box",
+                  columnIndex: -1,
+                  centerX: 800,
+                  topY: 500,
+                  maxWidth: 40,
+                  boxHeight: 40,
+                  fontSize: 34,
+                  format: "tick",
+                  matchValue: "",
+                }]);
+                setSelectedFieldId(id);
+              }}
+              className="text-sm text-brand-500 hover:text-brand-600 font-medium"
+            >
+              + Tick
             </button>
             </div>
           </div>
           {detectMsg && (
             <p className={`text-xs mb-2 ${detectMsg.startsWith("✓") ? "text-green-600" : "text-amber-600"}`}>{detectMsg}</p>
           )}
-          <p className="text-xs text-gray-400 mb-4">
-            Map each certificate blank to a spreadsheet column and configure its position on the template.
-            Coordinates are in pixels from the top-left of the template image.
+
+          {/* Visual designer */}
+          {templateUrl ? (
+            <div className="mb-5">
+              <TemplateDesigner
+                imageUrl={templateUrl}
+                fields={fields}
+                selectedId={selectedFieldId}
+                onSelect={setSelectedFieldId}
+                onChange={setFields}
+                onCreate={(box) => {
+                  const id = `field_${Date.now()}`;
+                  setFields((prev) => [
+                    ...prev,
+                    {
+                      id,
+                      label: `Field ${prev.length + 1}`,
+                      columnIndex: 0,
+                      centerX: box.centerX,
+                      topY: box.topY,
+                      maxWidth: box.maxWidth,
+                      boxHeight: box.boxHeight,
+                      fontSize: Math.max(10, Math.round(box.boxHeight * 0.65)),
+                      format: "text",
+                    },
+                  ]);
+                  setSelectedFieldId(id);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="mb-5 border-2 border-dashed border-gray-200 rounded-lg py-10 text-center text-sm text-gray-400">
+              Upload a certificate template above to draw field boxes directly on it.
+            </div>
+          )}
+
+          {/* Live preview */}
+          <div className="border-t border-gray-100 pt-5 mb-5">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <h3 className="font-medium text-gray-900 text-sm">Preview before creating</h3>
+                <p className="text-xs text-gray-400">
+                  Renders a real certificate for the longest name — the hardest case to fit. Adjust boxes and
+                  re-render as many times as you like.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleDraftPreview}
+                disabled={previewing || !templateFile || !categories.some((c) => c.file)}
+                className="shrink-0 ml-4 px-4 py-2 border border-brand-500 text-brand-500 hover:bg-brand-50 disabled:opacity-40 rounded-lg text-sm font-medium flex items-center gap-2"
+              >
+                {previewing && (
+                  <span className="inline-block w-3.5 h-3.5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+                )}
+                {previewing ? "Rendering…" : previewUrl ? "Re-render Preview" : "Render Preview"}
+              </button>
+            </div>
+            {previewError && <p className="text-red-600 text-sm mt-2">{previewError}</p>}
+            {previewUrl && (
+              <div className="mt-3 rounded-lg border border-gray-200 overflow-hidden">
+                <div className="bg-gray-50 px-4 py-2 border-b border-gray-100 flex items-center justify-between">
+                  <p className="text-xs text-gray-500">
+                    Sample for: <strong className="text-gray-700">{previewName || "longest name"}</strong>
+                  </p>
+                  <a href={previewUrl} download="preview.png" className="text-xs text-blue-600 hover:underline">
+                    Download
+                  </a>
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={previewUrl} alt="Certificate preview" className="w-full" />
+              </div>
+            )}
+          </div>
+
+          <p className="text-xs text-gray-400 mb-3">
+            Each box maps a certificate blank to a spreadsheet column. Coordinates are in pixels from the
+            top-left of the template. Use a <strong>Tick / Checkbox</strong> field for boxes that get a ✓
+            instead of text — for example, ticking the matching age group on a category certificate.
           </p>
           <div className="space-y-3">
             {fields.map((f, i) => (
@@ -514,6 +724,8 @@ export default function NewTournamentPage() {
                 field={f}
                 index={i}
                 columns={columns}
+                selected={f.id === selectedFieldId}
+                onSelect={() => setSelectedFieldId(f.id)}
                 onChange={(updated) => setFields(fields.map((x, j) => (j === i ? updated : x)))}
                 onRemove={() => setFields(fields.filter((_, j) => j !== i))}
               />

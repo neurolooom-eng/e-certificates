@@ -37,7 +37,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     // Count total certificates across all categories
     const allGenerated: Array<{ categoryName: string; cert: Awaited<ReturnType<typeof generateCertificates>>[number] }> = [];
     for (const { categoryName, xlsxBuffer } of sources) {
-      const certs = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config);
+      const certs = await generateCertificates(templateBuffer, xlsxBuffer, tournament.config, { categoryName });
       for (const cert of certs) allGenerated.push({ categoryName, cert });
     }
 
