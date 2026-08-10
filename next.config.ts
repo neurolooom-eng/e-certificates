@@ -15,6 +15,11 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: { bodySizeLimit: "50mb" },
   },
+  // The certificate renderer reads this font at runtime; serverless bundles
+  // ship no system fonts, so it must be traced into the function.
+  outputFileTracingIncludes: {
+    "/api/**": ["./assets/fonts/**"],
+  },
 };
 
 export default nextConfig;
