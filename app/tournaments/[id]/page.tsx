@@ -105,8 +105,10 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
     : 0;
 
   const filtered = tournament.certificates.filter((c) =>
-    c.recipientName.toLowerCase().includes(searchQuery.toLowerCase())
+    c.recipientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    (c.category ?? "").toLowerCase().includes(searchQuery.toLowerCase())
   );
+  const hasCategories = tournament.certificates.some((c) => c.category);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -289,14 +291,16 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
                 <tr>
                   <th className="text-left px-6 py-3 w-12">#</th>
                   <th className="text-left px-6 py-3">Recipient</th>
+                  {hasCategories && <th className="text-left px-6 py-3">Category</th>}
                   <th className="text-left px-6 py-3">Certificate</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((cert, i) => (
-                  <tr key={cert.driveFileId} className="hover:bg-gray-50">
+                  <tr key={`${cert.category ?? ""}_${cert.rowIndex}_${i}`} className="hover:bg-gray-50">
                     <td className="px-6 py-3 text-gray-400">{i + 1}</td>
                     <td className="px-6 py-3 font-medium text-gray-900">{cert.recipientName}</td>
+                    {hasCategories && <td className="px-6 py-3 text-gray-500">{cert.category ?? "—"}</td>}
                     <td className="px-6 py-3">
                       <a
                         href={cert.driveLink}

@@ -118,13 +118,26 @@ function FieldEditor({
   );
 }
 
+interface CategoryEntry {
+  id: string;
+  name: string;
+  file: File | null;
+}
+
+type EventType = "open" | "open_category" | "category";
+
 export default function NewTournamentPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [eventDate, setEventDate] = useState("");
+  const [eventType, setEventType] = useState<EventType>("open");
+  const [detecting, setDetecting] = useState(false);
+  const [detectMsg, setDetectMsg] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
   const [templateSizeKb, setTemplateSizeKb] = useState<number | null>(null);
-  const [dataFile, setDataFile] = useState<File | null>(null);
+  const [categories, setCategories] = useState<CategoryEntry[]>([
+    { id: `cat_${Date.now()}`, name: "", file: null },
+  ]);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
   const [textColor, setTextColor] = useState("#8B1E1E");
   const [fields, setFields] = useState<FieldConfig[]>(DEFAULT_FIELDS);
@@ -133,7 +146,6 @@ export default function NewTournamentPage() {
   const [submitStep, setSubmitStep] = useState("");
   const [error, setError] = useState("");
   const templateRef = useRef<HTMLInputElement>(null);
-  const dataRef = useRef<HTMLInputElement>(null);
 
   // Compress + resize template image client-side to stay under Vercel's 4.5MB body limit
   function compressImage(file: File): Promise<File> {
@@ -160,8 +172,53 @@ export default function NewTournamentPage() {
     });
   }
 
-  function handleDataFile(file: File) {
-    setDataFile(file);
+  async function handleAutoDetect() {
+    if (!templateFile || columns.length === 0) {
+      setDetectMsg("Upload the template and at least one Excel file first.");
+      return;
+    }
+    setDetecting(true);
+    setDetectMsg("Analyzing certificate template…");
+    try {
+      const buf = await templateFile.arrayBuffer();
+      const base64 = btoa(new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""));
+      const dims = await new Promise<{ w: number; h: number }>((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(templateFile);
+        img.onload = () => { URL.revokeObjectURL(url); resolve({ w: img.width, h: img.height }); };
+        img.onerror = reject;
+        img.src = url;
+      });
+      const res = await fetch("/api/detect-placement", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBase64: base64,
+          mediaType: templateFile.type || "image/jpeg",
+          columns,
+          width: dims.w,
+          height: dims.h,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setDetectMsg(data.error || "Auto-detection failed.");
+      } else {
+        setFields(
+          data.fields.map((f: Omit<FieldConfig, "id">, i: number) => ({ ...f, id: `detected_${i}` }))
+        );
+        if (data.textColor) setTextColor(data.textColor);
+        setDetectMsg(`✓ Detected ${data.fields.length} fields. Review below and preview before generating.`);
+      }
+    } catch (err: unknown) {
+      setDetectMsg(`Auto-detection failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    setDetecting(false);
+  }
+
+  function handleCategoryFile(catId: string, file: File) {
+    setCategories((prev) => prev.map((c) => (c.id === catId ? { ...c, file } : c)));
+    // Read columns from the first uploaded file for the field editors
     const reader = new FileReader();
     reader.onload = (e) => {
       const wb = XLSX.read(e.target?.result, { type: "array" });
@@ -175,8 +232,11 @@ export default function NewTournamentPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!templateFile || !dataFile) {
-      setError("Please upload both the certificate template and participant list.");
+    const validCategories = categories
+      .map((c) => (eventType === "open" ? { ...c, name: c.name.trim() || "Open" } : c))
+      .filter((c) => c.file && c.name.trim());
+    if (!templateFile || validCategories.length === 0) {
+      setError("Please upload the certificate template and at least one category with a name and Excel file.");
       return;
     }
     setSubmitting(true);
@@ -187,8 +247,10 @@ export default function NewTournamentPage() {
     const fd = new FormData();
     fd.append("name", name);
     fd.append("eventDate", eventDate);
+    fd.append("eventType", eventType);
     fd.append("template", templateFile);
-    fd.append("data", dataFile);
+    fd.append("categories", JSON.stringify(validCategories.map((c) => ({ name: c.name.trim() }))));
+    validCategories.forEach((c, i) => fd.append(`categoryData_${i}`, c.file!));
     fd.append("config", JSON.stringify(config));
 
     // Cycle through status messages so the user knows it's working
@@ -249,6 +311,24 @@ export default function NewTournamentPage() {
               />
             </div>
             <div className="col-span-2 sm:col-span-1">
+              <label className="block text-sm font-medium text-gray-700 mb-1">Event Type *</label>
+              <select
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                value={eventType}
+                onChange={(e) => {
+                  const t = e.target.value as EventType;
+                  setEventType(t);
+                  if (t === "open") {
+                    setCategories((prev) => [{ ...(prev[0] ?? { id: `cat_${Date.now()}`, file: null }), name: "Open" }]);
+                  }
+                }}
+              >
+                <option value="open">Open (single list)</option>
+                <option value="open_category">Open + Category (multiple lists)</option>
+                <option value="category">Category (multiple lists)</option>
+              </select>
+            </div>
+            <div className="col-span-2 sm:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">Event Date</label>
               <input
                 type="date"
@@ -294,30 +374,70 @@ export default function NewTournamentPage() {
                 }}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Participant List *</label>
-              <p className="text-xs text-gray-400 mb-2">Excel spreadsheet (.xlsx)</p>
-              <div
-                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-brand-500 transition-colors"
-                onClick={() => dataRef.current?.click()}
-              >
-                {dataFile ? (
-                  <p className="text-sm text-green-600">✓ {dataFile.name}</p>
-                ) : (
-                  <p className="text-sm text-gray-400">Click to upload .xlsx file</p>
-                )}
-              </div>
-              <input
-                ref={dataRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={(e) => e.target.files?.[0] && handleDataFile(e.target.files[0])}
-              />
+          </div>
+
+          {/* Categories */}
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">
+                {eventType === "open" ? "Participant List *" : "Categories *"}
+              </label>
+              {eventType !== "open" && (
+                <button
+                  type="button"
+                  onClick={() => setCategories([...categories, { id: `cat_${Date.now()}`, name: "", file: null }])}
+                  className="text-sm text-brand-500 hover:text-brand-600 font-medium"
+                >
+                  + Add Category
+                </button>
+              )}
+            </div>
+            <p className="text-xs text-gray-400 mb-3">
+              {eventType === "open"
+                ? "One participant Excel (.xlsx) for the whole event."
+                : "Each category has its own participant Excel (.xlsx). All use the same certificate template."}
+            </p>
+            <div className="space-y-3">
+              {categories.map((cat) => (
+                <div key={cat.id} className="flex items-center gap-3 border border-gray-200 rounded-lg p-3 bg-gray-50">
+                  {eventType !== "open" && (
+                    <input
+                      className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44 shrink-0"
+                      placeholder="e.g. Under 10 Open"
+                      value={cat.name}
+                      onChange={(e) =>
+                        setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, name: e.target.value } : c)))
+                      }
+                    />
+                  )}
+                  <label className="flex-1 border-2 border-dashed border-gray-300 rounded-lg px-3 py-2 text-center cursor-pointer hover:border-brand-500 transition-colors">
+                    {cat.file ? (
+                      <span className="text-sm text-green-600">✓ {cat.file.name}</span>
+                    ) : (
+                      <span className="text-sm text-gray-400">Upload .xlsx</span>
+                    )}
+                    <input
+                      type="file"
+                      accept=".xlsx,.xls"
+                      className="hidden"
+                      onChange={(e) => e.target.files?.[0] && handleCategoryFile(cat.id, e.target.files[0])}
+                    />
+                  </label>
+                  {eventType !== "open" && categories.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setCategories((prev) => prev.filter((c) => c.id !== cat.id))}
+                      className="text-red-400 hover:text-red-600 text-sm shrink-0"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
 
-          {dataFile && (
+          {categories.some((c) => c.file) && (
             <div className="mt-4 grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Header Row Index</label>
@@ -350,6 +470,16 @@ export default function NewTournamentPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold text-gray-900">Field Placement</h2>
+            <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={handleAutoDetect}
+              disabled={detecting || !templateFile || columns.length === 0}
+              className="text-sm bg-brand-500 hover:bg-brand-600 disabled:opacity-40 text-white px-3 py-1.5 rounded-lg font-medium flex items-center gap-1.5"
+            >
+              {detecting && <span className="inline-block w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+              {detecting ? "Detecting…" : "✨ Auto-Detect Placement"}
+            </button>
             <button
               type="button"
               onClick={() =>
@@ -368,7 +498,11 @@ export default function NewTournamentPage() {
             >
               + Add Field
             </button>
+            </div>
           </div>
+          {detectMsg && (
+            <p className={`text-xs mb-2 ${detectMsg.startsWith("✓") ? "text-green-600" : "text-amber-600"}`}>{detectMsg}</p>
+          )}
           <p className="text-xs text-gray-400 mb-4">
             Map each certificate blank to a spreadsheet column and configure its position on the template.
             Coordinates are in pixels from the top-left of the template image.
