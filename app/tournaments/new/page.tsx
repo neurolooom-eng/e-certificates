@@ -272,6 +272,9 @@ export default function NewTournamentPage() {
   // Visual designer + live preview
   const [templateUrl, setTemplateUrl] = useState<string | null>(null);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  // Raw sheet rows kept so the header row can be changed without re-uploading
+  const [sheetRows, setSheetRows] = useState<unknown[][]>([]);
+  const [autoMap, setAutoMap] = useState(true);
   const [previewCatId, setPreviewCatId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState("");
@@ -393,6 +396,40 @@ export default function NewTournamentPage() {
     setDetecting(false);
   }
 
+  /** Point the standard fields at the columns whose headers match them. */
+  function applyAutoMap(headerRow: unknown[], headerIdx: number) {
+    const mapped = mapColumns(headerRow);
+    if (mapped.length === 0) {
+      setDetectMsg("Couldn't recognise the column headers — map them manually below.");
+      return;
+    }
+    const byKey = Object.fromEntries(mapped.map((m) => [m.key, m.columnIndex]));
+    setFields((prev) =>
+      prev.map((f) => {
+        if (f.source === "meta") return f;
+        const idx =
+          f.id === "name" ? byKey.name
+          : f.id === "org" ? byKey.club
+          : f.id === "pts" ? byKey.points
+          : f.id === "place" ? byKey.rank
+          : undefined;
+        return idx === undefined ? f : { ...f, columnIndex: idx };
+      })
+    );
+    setDetectMsg(
+      `✓ Read the sheet: header on row ${headerIdx}, mapped ${mapped.length} columns automatically.`
+    );
+  }
+
+  /** Re-read columns when the organiser changes the header row by hand. */
+  function applyHeaderRow(idx: number) {
+    setHeaderRowIndex(idx);
+    if (sheetRows.length === 0) return;
+    const headerRow = (sheetRows[idx] || []) as unknown[];
+    setColumns(headerRow.map((c) => String(c ?? "")));
+    if (autoMap) applyAutoMap(headerRow, idx);
+  }
+
   function handleCategoryFile(catId: string, file: File) {
     setCategories((prev) => prev.map((c) => (c.id === catId ? { ...c, file } : c)));
     const reader = new FileReader();
@@ -410,26 +447,10 @@ export default function NewTournamentPage() {
       const headerRow = (rows[headerIdx] || rows[0] || []) as unknown[];
       setColumns(headerRow.map((c) => String(c ?? "")));
 
+      setSheetRows(rows);
+
       // Point the standard fields at the right columns automatically
-      const mapped = mapColumns(headerRow);
-      if (mapped.length > 0) {
-        const byKey = Object.fromEntries(mapped.map((m) => [m.key, m.columnIndex]));
-        setFields((prev) =>
-          prev.map((f) => {
-            if (f.source === "meta") return f;
-            const idx =
-              f.id === "name" ? byKey.name
-              : f.id === "org" ? byKey.club
-              : f.id === "pts" ? byKey.points
-              : f.id === "place" ? byKey.rank
-              : undefined;
-            return idx === undefined ? f : { ...f, columnIndex: idx };
-          })
-        );
-        setDetectMsg(
-          `✓ Read the sheet: header on row ${headerIdx}, mapped ${mapped.length} columns automatically.`
-        );
-      }
+      if (autoMap) applyAutoMap(headerRow, headerIdx);
 
       // Category / rounds parsed straight out of the sheet's header text
       const meta = metaFromRows(rows, headerIdx);
@@ -711,19 +732,86 @@ export default function NewTournamentPage() {
             </div>
           </div>
 
+          {/* Column mapping override */}
+          {sheetRows.length > 0 && (
+            <div className="mt-6 border-t border-gray-100 pt-5">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="font-medium text-gray-900 text-sm">Columns</h3>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-xs text-gray-600">
+                    <input
+                      type="checkbox"
+                      checked={autoMap}
+                      onChange={(e) => setAutoMap(e.target.checked)}
+                    />
+                    Auto-map columns
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => applyAutoMap((sheetRows[headerRowIndex] || []) as unknown[], headerRowIndex)}
+                    className="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                  >
+                    Re-run auto-map
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">
+                Auto-mapping is a starting point — override any column below, or turn it off to map
+                everything by hand. Uncheck it before uploading more files to keep your choices.
+              </p>
+
+              <div className="flex items-end gap-4 mb-3">
+                <div className="w-40">
+                  <label className="block text-xs text-gray-500 mb-1">Header row</label>
+                  <input
+                    type="number"
+                    min="0"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                    value={headerRowIndex}
+                    onChange={(e) => applyHeaderRow(Number(e.target.value))}
+                  />
+                </div>
+                <p className="text-xs text-gray-400 pb-2">
+                  0-based. The row holding <em>Rk. / Name / Pts.</em> — detected automatically on upload.
+                </p>
+              </div>
+
+              {/* Column reference with sample values */}
+              <div className="overflow-x-auto border border-gray-200 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 text-gray-500">
+                    <tr>
+                      <th className="text-left px-3 py-2 w-12">#</th>
+                      <th className="text-left px-3 py-2">Header</th>
+                      <th className="text-left px-3 py-2">Sample value</th>
+                      <th className="text-left px-3 py-2">Used by</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {columns.map((c, i) => {
+                      const sample = String(
+                        (sheetRows[headerRowIndex + 1] as unknown[] | undefined)?.[i] ?? ""
+                      );
+                      const usedBy = fields
+                        .filter((f) => f.source !== "meta" && f.columnIndex === i)
+                        .map((f) => f.label);
+                      return (
+                        <tr key={i} className={usedBy.length ? "bg-brand-50/50" : ""}>
+                          <td className="px-3 py-1.5 font-mono text-gray-400">{i}</td>
+                          <td className="px-3 py-1.5 font-medium text-gray-700">{c || <em className="text-gray-300">blank</em>}</td>
+                          <td className="px-3 py-1.5 text-gray-500 truncate max-w-[200px]">{sample}</td>
+                          <td className="px-3 py-1.5 text-brand-500">{usedBy.join(", ")}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           {categories.some((c) => c.file) && (
             <div className="mt-4 grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Header Row Index</label>
-                <p className="text-xs text-gray-400 mb-1">0-based. Use 3 for Chess-Results.com exports.</p>
-                <input
-                  type="number"
-                  min="0"
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                  value={headerRowIndex}
-                  onChange={(e) => setHeaderRowIndex(Number(e.target.value))}
-                />
-              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Certificate Text Color</label>
                 <div className="flex items-center gap-2 mt-1">
