@@ -1,20 +1,45 @@
 import sharp from "sharp";
 import * as XLSX from "xlsx";
+import * as opentype from "opentype.js";
 import path from "path";
 import fs from "fs";
 import type { TournamentConfig, FieldConfig } from "./types";
 import { metaFromRows, metaValue, EMPTY_META, type SheetMeta } from "./sheet-meta";
 
-// Approximate bold sans-serif character widths relative to font-size.
-// Good enough for auto-shrink; avoids needing a native font engine.
-const AVG_CHAR_RATIO = 0.58;
+/**
+ * Text is rendered as vector outlines from a bundled font rather than as SVG
+ * <text>. Serverless runtimes ship no fonts and no fontconfig, so <text> comes
+ * out as "tofu" placeholder boxes there. Outlines render identically
+ * everywhere and give exact widths for the auto-shrink fit.
+ */
+let cachedFont: opentype.Font | null = null;
 
-function estimateWidth(text: string, fontSize: number): number {
-  return text.length * fontSize * AVG_CHAR_RATIO;
+function getFont(): opentype.Font {
+  if (cachedFont) return cachedFont;
+  const candidates = [
+    path.join(process.cwd(), "assets", "fonts", "LiberationSans-Bold.ttf"),
+    path.join(process.cwd(), "assets/fonts/LiberationSans-Bold.ttf"),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) {
+      const buf = fs.readFileSync(p);
+      cachedFont = opentype.parse(
+        buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
+      );
+      return cachedFont;
+    }
+  }
+  throw new Error(
+    "Certificate font not found. Expected assets/fonts/LiberationSans-Bold.ttf to ship with the deployment."
+  );
+}
+
+function measureWidth(text: string, fontSize: number): number {
+  return getFont().getAdvanceWidth(text, fontSize);
 }
 
 function fitFontSize(text: string, maxWidth: number, fontSize: number, minSize = 14): number {
-  while (fontSize > minSize && estimateWidth(text, fontSize) > maxWidth) {
+  while (fontSize > minSize && measureWidth(text, fontSize) > maxWidth) {
     fontSize -= 1;
   }
   return fontSize;
@@ -73,16 +98,17 @@ function buildSvgOverlay(
       return `<path d="${d}" fill="none" stroke="${fill}" stroke-width="${Math.max(2, size * 0.14)}" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
 
-    const fs = fitFontSize(text, f.maxWidth, f.fontSize);
-    // SVG text-anchor="middle" handles horizontal centering; y is top + ascender
-    const ascender = fs * 0.8;
+    if (!text) return "";
+
+    const size = fitFontSize(text, f.maxWidth, f.fontSize);
+    const font = getFont();
+    // Centre horizontally on centerX; place the baseline one ascender below topY
+    const width = font.getAdvanceWidth(text, size);
+    const x = f.centerX - width / 2;
+    const ascender = (font.ascender / font.unitsPerEm) * size;
     const y = f.topY + ascender;
-    const escaped = text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
-    return `<text x="${f.centerX}" y="${y}" text-anchor="middle" font-family="DejaVu Sans,Arial,Helvetica,sans-serif" font-weight="bold" font-size="${fs}" fill="${fill}">${escaped}</text>`;
+    const d = font.getPath(text, x, y, size).toPathData(2);
+    return `<path d="${d}" fill="${fill}"/>`;
   });
 
   const svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${texts.join("")}</svg>`;
