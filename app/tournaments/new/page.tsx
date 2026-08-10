@@ -358,7 +358,7 @@ export default function NewTournamentPage() {
       return;
     }
     setDetecting(true);
-    setDetectMsg("Analyzing certificate template…");
+    setDetectMsg("Reading the certificate and matching it to your spreadsheet…");
     try {
       const buf = await templateFile.arrayBuffer();
       const base64 = btoa(new Uint8Array(buf).reduce((s, b) => s + String.fromCharCode(b), ""));
@@ -369,6 +369,15 @@ export default function NewTournamentPage() {
         img.onerror = reject;
         img.src = url;
       });
+
+      // A real value per column so the model matches on data, not just headers
+      const firstDataRow = (sheetRows[headerRowIndex + 1] ?? []) as unknown[];
+      const samples = columns.map((_, i) => {
+        const v = firstDataRow[i];
+        return v === undefined || v === null || v === "" ? "" : String(v).slice(0, 40);
+      });
+
+      const cat = categories.find((c) => c.file);
       const res = await fetch("/api/detect-placement", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -376,6 +385,10 @@ export default function NewTournamentPage() {
           imageBase64: base64,
           mediaType: templateFile.type || "image/jpeg",
           columns,
+          samples,
+          meta: cat
+            ? { category: cat.name, age: cat.age, gender: cat.gender, rounds: cat.rounds }
+            : undefined,
           width: dims.w,
           height: dims.h,
         }),
@@ -384,11 +397,26 @@ export default function NewTournamentPage() {
       if (!res.ok) {
         setDetectMsg(data.error || "Auto-detection failed.");
       } else {
-        setFields(
-          data.fields.map((f: Omit<FieldConfig, "id">, i: number) => ({ ...f, id: `detected_${i}` }))
-        );
+        type Detected = Omit<FieldConfig, "id"> & { metaKey?: string; source?: string };
+        const detected: FieldConfig[] = (data.fields as Detected[]).map((f, i) => ({
+          ...f,
+          id: `detected_${i}`,
+          // The model returns "none"/-1 placeholders for the unused half of the union
+          metaKey: f.source === "meta" ? (f.metaKey as FieldConfig["metaKey"]) : undefined,
+          source: f.source === "meta" ? "meta" : "column",
+          matchValue: f.matchValue || undefined,
+          prefix: f.prefix || undefined,
+          suffix: f.suffix || undefined,
+        }));
+        setFields(detected);
+        setSelectedFieldId(detected[0]?.id ?? null);
         if (data.textColor) setTextColor(data.textColor);
-        setDetectMsg(`✓ Detected ${data.fields.length} fields. Review below and preview before generating.`);
+        const ticks = detected.filter((f) => f.format === "tick").length;
+        setDetectMsg(
+          `✓ Found ${detected.length} field${detected.length === 1 ? "" : "s"}` +
+          (ticks ? ` (${ticks} tick box${ticks === 1 ? "" : "es"})` : "") +
+          `. ${data.notes ?? ""} Render a preview to check placement.`
+        );
       }
     } catch (err: unknown) {
       setDetectMsg(`Auto-detection failed: ${err instanceof Error ? err.message : String(err)}`);
