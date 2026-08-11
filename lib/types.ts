@@ -65,6 +65,8 @@ export interface Certificate {
   driveLink: string;
   generatedAt: string;
   category?: string;
+  /** Finishing position, taken from the rank column when one is mapped. */
+  rank?: number;
 }
 
 export type EventType = "open" | "open_category" | "category";

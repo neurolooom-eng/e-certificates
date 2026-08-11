@@ -1,77 +1,114 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Certificate } from "@/lib/types";
 
-export default function ShareTable({ certificates }: { certificates: Certificate[] }) {
+function ordinalSuffix(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return "th";
+  return { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
+}
+
+export default function ShareTable({
+  certificates,
+  categories,
+}: {
+  certificates: Certificate[];
+  categories: string[];
+}) {
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<string>("");
 
-  const q = query.trim().toLowerCase();
-  const filtered = q
-    ? certificates.filter(
-        (c) =>
-          c.recipientName.toLowerCase().includes(q) ||
-          (c.category ?? "").toLowerCase().includes(q)
-      )
-    : certificates;
-
-  const hasCategories = certificates.some((c) => c.category);
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return certificates.filter((c) => {
+      if (category && c.category !== category) return false;
+      if (!q) return true;
+      return (
+        c.recipientName.toLowerCase().includes(q) ||
+        (c.category ?? "").toLowerCase().includes(q) ||
+        (c.rank !== undefined && String(c.rank).startsWith(q))
+      );
+    });
+  }, [certificates, query, category]);
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="px-4 sm:px-6 py-4 border-b border-gray-100">
-        <input
-          type="search"
-          placeholder="Search for your name…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          autoFocus
-        />
+    <div>
+      {/* Category filter */}
+      {categories.length > 1 && (
+        <div className="flex flex-wrap gap-2 mb-5">
+          <button
+            onClick={() => setCategory("")}
+            className={`cert-chip ${category === "" ? "cert-chip-on" : ""}`}
+          >
+            All
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c}
+              onClick={() => setCategory(c)}
+              className={`cert-chip ${category === c ? "cert-chip-on" : ""}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="flex items-center gap-5">
+        <div className="cert-search flex-1 flex items-center gap-3">
+          <svg className="w-4 h-4 shrink-0 opacity-40" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <circle cx="11" cy="11" r="7" />
+            <path d="m20 20-3.5-3.5" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            placeholder="Search by name or rank…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full bg-transparent outline-none"
+          />
+        </div>
+        <p className="cert-count shrink-0">
+          <strong>{filtered.length}</strong> shown
+        </p>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
-            <tr>
-              <th className="text-left px-4 sm:px-6 py-3">Name</th>
-              {hasCategories && <th className="text-left px-4 py-3">Category</th>}
-              <th className="text-right px-4 sm:px-6 py-3">Certificate</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {filtered.map((cert, i) => (
-              <tr key={`${cert.driveLink}-${i}`} className="hover:bg-gray-50">
-                <td className="px-4 sm:px-6 py-3 font-medium text-gray-900">{cert.recipientName}</td>
-                {hasCategories && (
-                  <td className="px-4 py-3 text-gray-500">{cert.category ?? "—"}</td>
-                )}
-                <td className="px-4 sm:px-6 py-3 text-right whitespace-nowrap">
-                  <a
-                    href={cert.driveLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-800 font-medium"
-                  >
-                    View
-                  </a>
-                  <a
-                    href={cert.driveLink}
-                    download
-                    className="inline-flex items-center gap-1.5 text-gray-500 hover:text-gray-700 ml-4"
-                  >
-                    Download
-                  </a>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* Rows */}
+      <ul className="mt-6">
+        {filtered.map((cert, i) => (
+          <li key={`${cert.driveLink}-${i}`} className="cert-row">
+            <span className="cert-rank">
+              {cert.rank !== undefined ? (
+                <>
+                  {cert.rank}
+                  <sup>{ordinalSuffix(cert.rank)}</sup>
+                </>
+              ) : (
+                <span className="opacity-25">–</span>
+              )}
+            </span>
 
-      {q && filtered.length === 0 && (
-        <p className="text-center text-gray-400 py-10 text-sm">
-          No certificate found for &quot;{query}&quot;. Check the spelling, or contact the organiser.
+            <span className="cert-name">
+              {cert.recipientName}
+              {/* Only worth showing when it distinguishes rows — a single
+                  category is already named in the page subtitle */}
+              {cert.category && categories.length > 1 && !category && (
+                <span className="cert-cat">{cert.category}</span>
+              )}
+            </span>
+
+            <a href={cert.driveLink} target="_blank" rel="noreferrer" className="cert-open">
+              Open <span aria-hidden>↗</span>
+            </a>
+          </li>
+        ))}
+      </ul>
+
+      {filtered.length === 0 && (
+        <p className="cert-sub text-center py-16">
+          Nothing matches {query ? `“${query}”` : "that filter"}. Check the spelling, or ask the organiser.
         </p>
       )}
     </div>

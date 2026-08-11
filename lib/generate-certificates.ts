@@ -169,6 +169,8 @@ export interface GeneratedCertificate {
   name: string;
   buffer: Buffer;
   filename: string;
+  /** Finishing position, from the rank column when one is mapped. */
+  rank?: number;
 }
 
 export async function generateCertificates(
@@ -215,6 +217,7 @@ export async function generateCertificates(
     const row = rows[i];
     const values: Record<string, string> = {};
     let recipientName = "";
+    let rank: number | undefined;
 
     for (const field of config.fields) {
       // Where does this field's raw value come from?
@@ -238,6 +241,10 @@ export async function generateCertificates(
       }
       values[field.id] = text ? `${field.prefix ?? ""}${text}${field.suffix ?? ""}` : "";
       if (field.format === "text" && field.source !== "meta" && !recipientName) recipientName = text;
+      if (field.format === "ordinal" && rank === undefined) {
+        const n = Number(raw);
+        if (!isNaN(n)) rank = n;
+      }
     }
 
     const svgOverlay = buildSvgOverlay(width, height, config.fields, values, config.textColor);
@@ -249,7 +256,7 @@ export async function generateCertificates(
     const safeName = recipientName.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
     const filename = `${String(i + 1).padStart(4, "0")}_${safeName}.png`;
 
-    results.push({ rowIndex: i, name: recipientName, buffer: outputBuffer, filename });
+    results.push({ rowIndex: i, name: recipientName, buffer: outputBuffer, filename, rank });
   }
 
   return results;

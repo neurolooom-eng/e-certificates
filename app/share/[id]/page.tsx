@@ -1,7 +1,20 @@
+import { Playfair_Display, JetBrains_Mono } from "next/font/google";
 import { getTournament } from "@/lib/storage";
 import ShareTable from "./ShareTable";
 
 export const dynamic = "force-dynamic";
+
+const display = Playfair_Display({ subsets: ["latin"], weight: ["700", "900"], variable: "--font-display" });
+const mono = JetBrains_Mono({ subsets: ["latin"], weight: ["400", "500", "700"], variable: "--font-mono" });
+
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const t = await getTournament(id);
+  return {
+    title: t ? `${t.name} — Certificates` : "Certificates",
+    description: t ? `Find and download your certificate for ${t.name}.` : undefined,
+  };
+}
 
 /**
  * Public certificate page — no login required. This is the link organisers
@@ -13,47 +26,44 @@ export default async function SharePage({ params }: { params: Promise<{ id: stri
 
   if (!tournament) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+      <div className={`${display.variable} ${mono.variable} cert-page min-h-screen flex items-center justify-center px-6`}>
         <div className="text-center">
-          <p className="text-5xl mb-4">🔍</p>
-          <h1 className="text-xl font-bold text-gray-900 mb-1">Certificates not found</h1>
-          <p className="text-gray-500 text-sm">This link may be incorrect or the tournament was removed.</p>
+          <p className="cert-eyebrow mb-3">Certificate · Not found</p>
+          <h1 className="cert-title text-4xl mb-2">This link doesn&apos;t work</h1>
+          <p className="cert-sub">The address may be mistyped, or the tournament was removed.</p>
         </div>
       </div>
     );
   }
 
-  const ready = tournament.status === "ready";
+  const categories = Array.from(
+    new Set(tournament.certificates.map((c) => c.category).filter(Boolean) as string[])
+  );
+  const year = new Date(tournament.eventDate).getFullYear();
+  const subtitle = [
+    categories.length === 1 ? categories[0] : null,
+    String(year),
+    "Certificate of Merit",
+  ].filter(Boolean).join("  ·  ");
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="max-w-4xl mx-auto px-4 py-10">
-        <header className="text-center mb-8">
-          <p className="text-4xl mb-3">🏆</p>
-          <h1 className="text-3xl font-bold text-gray-900">{tournament.name}</h1>
-          <p className="text-gray-500 mt-1">
-            {new Date(tournament.eventDate).toLocaleDateString("en-US", {
-              year: "numeric", month: "long", day: "numeric",
-            })}
-          </p>
-          <p className="text-sm text-gray-400 mt-3">
-            Find your name below and click to open or download your certificate.
-          </p>
+    <div className={`${display.variable} ${mono.variable} cert-page min-h-screen`}>
+      <div className="max-w-5xl mx-auto px-6 sm:px-10 py-14">
+        <header>
+          <p className="cert-eyebrow">Certificate of Merit · Find yours</p>
+          <h1 className="cert-title text-5xl sm:text-6xl leading-[1.05] mt-4">{tournament.name}</h1>
+          <p className="cert-sub mt-4">{subtitle}</p>
         </header>
 
-        {!ready && tournament.certificates.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">
-            <p className="font-medium">Certificates are still being prepared.</p>
-            <p className="text-sm mt-1">Please check back shortly.</p>
+        <div className="cert-rule mt-8 mb-8" />
+
+        {tournament.certificates.length === 0 ? (
+          <div className="py-20 text-center">
+            <p className="cert-sub">Certificates are still being prepared. Please check back shortly.</p>
           </div>
         ) : (
-          <ShareTable certificates={tournament.certificates} />
+          <ShareTable certificates={tournament.certificates} categories={categories} />
         )}
-
-        <p className="text-center text-xs text-gray-400 mt-8">
-          {tournament.certificates.length} certificate
-          {tournament.certificates.length === 1 ? "" : "s"} · Links are permanent
-        </p>
       </div>
     </div>
   );

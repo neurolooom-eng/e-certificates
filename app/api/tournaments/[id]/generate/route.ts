@@ -68,6 +68,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
         driveFileId: "",
         driveLink: url,
         category: categoryName || undefined,
+        rank: cert.rank,
         generatedAt: new Date().toISOString(),
       });
 
