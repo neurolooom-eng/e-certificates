@@ -17,6 +17,13 @@ export default function UsersPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
 
+  const [draft, setDraft] = useState({
+    name: "", username: "", password: "", email: "", organisation: "", role: "organiser",
+  });
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState("");
+  const [added, setAdded] = useState("");
+
   const load = useCallback(async () => {
     const res = await fetch("/api/users");
     if (res.ok) setUsers(await res.json());
@@ -35,6 +42,36 @@ export default function UsersPage() {
     });
     await load();
     setBusy(null);
+  }
+
+  /** Create an account directly — it is approved on the spot. */
+  async function addUser(e: React.FormEvent) {
+    e.preventDefault();
+    setAdding(true);
+    setAddError("");
+    setAdded("");
+    const res = await fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(draft),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setAdded(`${draft.name} can sign in as “${draft.username}” with the password you set.`);
+      setDraft({ name: "", username: "", password: "", email: "", organisation: "", role: "organiser" });
+      await load();
+    } else {
+      setAddError(data.error || "Could not create the account.");
+    }
+    setAdding(false);
+  }
+
+  /** Suggested password, so the admin doesn't have to invent one. */
+  function suggestPassword() {
+    const bytes = new Uint8Array(9);
+    crypto.getRandomValues(bytes);
+    const pw = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, "").slice(0, 12);
+    setDraft((d) => ({ ...d, password: pw }));
   }
 
   async function remove(id: string) {
@@ -73,6 +110,79 @@ export default function UsersPage() {
           Approve organisers so they can create and generate their own tournaments.
         </p>
       </div>
+
+      <form
+        onSubmit={addUser}
+        className="bg-white rounded-xl border border-gray-200 p-4 mb-6"
+      >
+        <h2 className="font-semibold text-gray-900 text-sm mb-3">Add an account</h2>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input
+            required
+            value={draft.name}
+            onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+            placeholder="Full name"
+            className="flex-1 min-w-[140px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <input
+            required
+            value={draft.username}
+            onChange={(e) => setDraft({ ...draft, username: e.target.value })}
+            placeholder="username"
+            className="flex-1 min-w-[120px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <div className="flex-1 min-w-[160px] relative">
+            <input
+              required
+              value={draft.password}
+              onChange={(e) => setDraft({ ...draft, password: e.target.value })}
+              placeholder="password (8+)"
+              className="w-full border border-gray-300 rounded-lg pl-3 pr-16 py-2 text-sm"
+            />
+            <button
+              type="button"
+              onClick={suggestPassword}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-xs text-brand-600 hover:text-brand-700 px-2 py-1"
+            >
+              generate
+            </button>
+          </div>
+          <input
+            value={draft.organisation}
+            onChange={(e) => setDraft({ ...draft, organisation: e.target.value })}
+            placeholder="Organisation"
+            className="flex-1 min-w-[130px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <input
+            type="email"
+            value={draft.email}
+            onChange={(e) => setDraft({ ...draft, email: e.target.value })}
+            placeholder="Email"
+            className="flex-1 min-w-[150px] border border-gray-300 rounded-lg px-3 py-2 text-sm"
+          />
+          <select
+            value={draft.role}
+            onChange={(e) => setDraft({ ...draft, role: e.target.value })}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+          >
+            <option value="organiser">Organiser</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button
+            type="submit"
+            disabled={adding}
+            className="bg-brand-600 hover:bg-brand-700 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium"
+          >
+            {adding ? "Adding…" : "Add"}
+          </button>
+        </div>
+        <p className="text-xs text-gray-400 mt-2">
+          Accounts you add here are approved immediately — no sign-up needed. Pass the password on
+          to them; it can&apos;t be read back afterwards.
+        </p>
+        {addError && <p className="text-sm text-red-600 mt-2">{addError}</p>}
+        {added && <p className="text-sm text-green-700 mt-2">{added}</p>}
+      </form>
 
       {pending.length > 0 && (
         <div className="bg-white rounded-xl border border-yellow-200 overflow-hidden mb-6">
