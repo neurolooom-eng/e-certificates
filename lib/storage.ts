@@ -37,10 +37,10 @@ function writeLocal(t: Tournament[]) {
 // ── Blob helpers ───────────────────────────────────────────────────────────
 
 /**
- * Metadata is read back immediately after being written (status changes,
- * generation progress), so it must not be cached. Blob URLs are served from
- * the CDN, which otherwise returns the previous copy — a status saved as
- * "previewed" reads back as "draft" and the UI never advances.
+ * Writes use only options the store is guaranteed to accept. Anything it
+ * rejects would throw on every save, and freshness is handled on the read
+ * side instead — the UI no longer depends on a status round-tripping back
+ * instantly.
  */
 async function blobPut(pathname: string, data: string | Buffer, contentType = "application/json") {
   const { put } = await import("@vercel/blob");
@@ -49,20 +49,22 @@ async function blobPut(pathname: string, data: string | Buffer, contentType = "a
     contentType,
     addRandomSuffix: false,
     allowOverwrite: true,
-    cacheControlMaxAge: 0,
   });
 }
 
 async function blobGet<T>(pathname: string): Promise<T | null> {
-  const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: pathname });
-  const match = blobs.find((b) => b.pathname === pathname);
-  if (!match) return null;
-
-  // Freshness comes from cacheControlMaxAge on write plus no-store here.
-  // Never decorate the URL — anything the object store rejects turns a live
-  // record into a silent null, which reads as "everything disappeared".
   try {
+    const { list } = await import("@vercel/blob");
+    const { blobs } = await list({ prefix: pathname });
+    if (blobs.length === 0) return null;
+
+    // Prefer an exact match, but a lone prefix hit is the same object — never
+    // report a record as missing over an equality quirk in the pathname.
+    const match = blobs.find((b) => b.pathname === pathname) ?? (blobs.length === 1 ? blobs[0] : null);
+    if (!match) return null;
+
+    // Never decorate the URL: anything the store rejects turns a live record
+    // into a silent null, which reads as "everything disappeared".
     const res = await fetch(match.url, { cache: "no-store" });
     if (!res.ok) return null;
     return (await res.json()) as T;
@@ -152,7 +154,15 @@ export async function readTournaments(): Promise<Tournament[]> {
 
 export async function getTournament(id: string): Promise<Tournament | null> {
   if (!IS_VERCEL) return readLocal().find((t) => t.id === id) ?? null;
-  return blobGet<Tournament>(`tournaments/${id}/tournament.json`);
+
+  const full = await blobGet<Tournament>(`tournaments/${id}/tournament.json`);
+  if (full) return full;
+
+  // Fall back to the index entry. It carries the name, date and certificate
+  // links — enough to keep the share page and the list working even if the
+  // full record can't be read. Only generation needs the embedded files.
+  const index = (await blobGet<Tournament[]>("tournaments/index.json")) ?? [];
+  return index.find((t) => t.id === id) ?? null;
 }
 
 export async function saveTournament(tournament: Tournament) {
