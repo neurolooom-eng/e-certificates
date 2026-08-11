@@ -70,6 +70,15 @@ export async function blobUploadBuffer(
   pathname: string,
   contentType: string
 ): Promise<string> {
+  // Local dev has no Blob store — serve generated certificates from /public
+  // so the whole flow (including the share page) works offline.
+  if (!IS_VERCEL) {
+    const file = path.join(process.cwd(), "public", "generated", pathname);
+    ensureDir(path.dirname(file));
+    fs.writeFileSync(file, buffer);
+    return `/generated/${encodeURI(pathname)}`;
+  }
+
   const { put } = await import("@vercel/blob");
   const { url } = await put(pathname, buffer, { access: "public", contentType, addRandomSuffix: false });
   return url;
@@ -121,6 +130,7 @@ export async function saveTournament(tournament: Tournament) {
     progress: tournament.progress,
     eventType: tournament.eventType,
     archived: tournament.archived,
+    generationControl: tournament.generationControl,
     ownerId: tournament.ownerId,
     ownerName: tournament.ownerName,
   };

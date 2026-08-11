@@ -92,11 +92,7 @@ export default function ShareTable({
 
             <span className="cert-name">
               {cert.recipientName}
-              {/* Only worth showing when it distinguishes rows — a single
-                  category is already named in the page subtitle */}
-              {cert.category && categories.length > 1 && !category && (
-                <span className="cert-cat">{cert.category}</span>
-              )}
+              <span className="cert-cat">{cert.category || "Open"}</span>
             </span>
 
             <a href={cert.driveLink} target="_blank" rel="noreferrer" className="cert-open">

@@ -8,9 +8,17 @@ const STATUS_COLOR: Record<string, string> = {
   draft:      "text-gray-600 bg-gray-100",
   previewed:  "text-blue-700 bg-blue-100",
   generating: "text-yellow-700 bg-yellow-100",
+  paused:     "text-orange-700 bg-orange-100",
+  stopped:    "text-gray-700 bg-gray-200",
   ready:      "text-green-700 bg-green-100",
   error:      "text-red-700 bg-red-100",
 };
+
+function ordinal(n: number): string {
+  const v = n % 100;
+  const suffix = v >= 11 && v <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] ?? "th";
+  return `${n}${suffix}`;
+}
 
 function Step({ n, label, active, done }: { n: number; label: string; active: boolean; done: boolean }) {
   return (
@@ -35,6 +43,7 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [controlBusy, setControlBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [shareUrl, setShareUrl] = useState(`/share/${id}`);
 
@@ -76,6 +85,25 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
     setPreviewLoading(false);
   }
 
+  /** Pause / resume / stop a run. The loop picks the flag up between certificates. */
+  async function handleControl(action: "pause" | "resume" | "stop") {
+    setControlBusy(true);
+    setGenerateError("");
+    await fetch(`/api/tournaments/${id}/control`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+
+    if (action === "resume") {
+      setTournament((t) => (t ? { ...t, status: "generating" } : t));
+      // Resuming needs a fresh run — it skips whatever is already uploaded
+      fetch(`/api/tournaments/${id}/generate`, { method: "POST" }).catch(() => {});
+    }
+    await fetchTournament();
+    setControlBusy(false);
+  }
+
   async function handleGenerate() {
     setGenerating(true);
     setGenerateError("");
@@ -113,6 +141,8 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
   const status = tournament.status;
   const isReady = status === "ready";
   const isGenerating = status === "generating";
+  const isPaused = status === "paused";
+  const isStopped = status === "stopped";
   // A rendered preview in this session is enough to approve — don't make the
   // Approve step wait on the saved status round-tripping back.
   const isPreviewed = status === "previewed" || (!!previewUrl && status === "draft");
@@ -123,11 +153,13 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
     ? Math.round((progress.current / progress.total) * 100)
     : 0;
 
+  const q = searchQuery.trim().toLowerCase();
   const filtered = tournament.certificates.filter((c) =>
-    c.recipientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (c.category ?? "").toLowerCase().includes(searchQuery.toLowerCase())
+    !q ||
+    c.recipientName.toLowerCase().includes(q) ||
+    (c.category ?? "").toLowerCase().includes(q) ||
+    (c.rank !== undefined && String(c.rank).startsWith(q))
   );
-  const hasCategories = tournament.certificates.some((c) => c.category);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -262,24 +294,81 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
             </div>
           )}
 
-          {/* Step 3 – Progress */}
-          {isGenerating && (
+          {/* Step 3 – Progress, with run controls */}
+          {(isGenerating || isPaused || isStopped) && (
             <div className="border-t border-gray-100 pt-5">
-              <h2 className="font-semibold text-gray-900 mb-3">Generating certificates…</h2>
+              <div className="flex items-center justify-between mb-3 gap-4">
+                <h2 className="font-semibold text-gray-900">
+                  {isGenerating ? "Generating certificates…" : isPaused ? "Paused" : "Stopped"}
+                </h2>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {isGenerating && (
+                    <>
+                      <button
+                        onClick={() => handleControl("pause")}
+                        disabled={controlBusy}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                      >
+                        ⏸ Pause
+                      </button>
+                      <button
+                        onClick={() => handleControl("stop")}
+                        disabled={controlBusy}
+                        className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50"
+                      >
+                        ⏹ Stop
+                      </button>
+                    </>
+                  )}
+
+                  {(isPaused || isStopped) && (
+                    <>
+                      <button
+                        onClick={() => handleControl("resume")}
+                        disabled={controlBusy}
+                        className="bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-sm font-medium"
+                      >
+                        ▶ Resume
+                      </button>
+                      <button
+                        onClick={handleGenerate}
+                        disabled={controlBusy || generating}
+                        className="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                        title="Discard what was generated and start over"
+                      >
+                        ↻ Start over
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+
               <div className="w-full bg-gray-100 rounded-full h-3 mb-2 overflow-hidden">
                 <div
-                  className="bg-brand-500 h-3 rounded-full transition-all duration-500"
+                  className={`h-3 rounded-full transition-all duration-500 ${
+                    isGenerating ? "bg-brand-500" : isPaused ? "bg-orange-400" : "bg-gray-400"
+                  }`}
                   style={{ width: `${progressPct}%` }}
                 />
               </div>
               <div className="flex justify-between text-xs text-gray-500">
-                <span className="animate-pulse">{progress && progress.total > 0 ? "Rendering and uploading…" : "Starting up — rendering certificates…"}</span>
+                <span className={isGenerating ? "animate-pulse" : ""}>
+                  {isGenerating
+                    ? progress && progress.total > 0
+                      ? "Rendering and uploading…"
+                      : "Starting up — rendering certificates…"
+                    : isPaused
+                    ? "Resume picks up where it left off — finished certificates are kept."
+                    : "Stopped. Resume to finish the rest, or start over from scratch."}
+                </span>
                 {progress && progress.total > 0 && (
                   <span className="font-medium text-gray-700">
                     {progress.current} / {progress.total}
                   </span>
                 )}
               </div>
+              {generateError && <p className="text-red-600 text-sm mt-2">{generateError}</p>}
             </div>
           )}
         </div>
@@ -348,7 +437,7 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
             </h2>
             <input
               type="text"
-              placeholder="Search by name…"
+              placeholder="Search name, category or rank…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm w-56"
@@ -358,18 +447,20 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 uppercase text-xs">
                 <tr>
-                  <th className="text-left px-6 py-3 w-12">#</th>
+                  <th className="text-left px-6 py-3 w-16">Rank</th>
                   <th className="text-left px-6 py-3">Recipient</th>
-                  {hasCategories && <th className="text-left px-6 py-3">Category</th>}
+                  <th className="text-left px-6 py-3">Category</th>
                   <th className="text-left px-6 py-3">Certificate</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {filtered.map((cert, i) => (
                   <tr key={`${cert.category ?? ""}_${cert.rowIndex}_${i}`} className="hover:bg-gray-50">
-                    <td className="px-6 py-3 text-gray-400">{i + 1}</td>
+                    <td className="px-6 py-3 font-medium text-gray-700">
+                      {cert.rank !== undefined ? ordinal(cert.rank) : <span className="text-gray-300">—</span>}
+                    </td>
                     <td className="px-6 py-3 font-medium text-gray-900">{cert.recipientName}</td>
-                    {hasCategories && <td className="px-6 py-3 text-gray-500">{cert.category ?? "—"}</td>}
+                    <td className="px-6 py-3 text-gray-500">{cert.category || "Open"}</td>
                     <td className="px-6 py-3">
                       <a
                         href={cert.driveLink}

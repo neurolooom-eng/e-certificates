@@ -42,7 +42,11 @@ export interface TournamentConfig {
   fields: FieldConfig[];
 }
 
-export type TournamentStatus = "draft" | "previewed" | "generating" | "ready" | "error";
+export type TournamentStatus =
+  | "draft" | "previewed" | "generating" | "paused" | "stopped" | "ready" | "error";
+
+/** Cooperative signal the generation loop checks between certificates. */
+export type GenerationControl = "run" | "pause" | "stop";
 
 export interface GenerationProgress {
   current: number;
@@ -74,6 +78,8 @@ export type EventType = "open" | "open_category" | "category";
 export interface Tournament {
   eventType?: EventType;
   archived?: boolean;
+  /** Set by the pause/stop controls; read by the generation loop. */
+  generationControl?: GenerationControl;
   /** Account that created it. Absent on tournaments made before accounts existed. */
   ownerId?: string;
   ownerName?: string;
