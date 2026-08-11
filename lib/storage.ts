@@ -52,6 +52,34 @@ async function blobPut(pathname: string, data: string | Buffer, contentType = "a
   });
 }
 
+/**
+ * Read a blob's contents.
+ *
+ * A store that isn't serving public URLs answers 403 on a plain fetch, which
+ * would make every record look missing. Retry the same URL with the store
+ * token so reads work whether or not the store is public.
+ */
+export async function fetchBlob(url: string): Promise<Response | null> {
+  try {
+    const direct = await fetch(url, { cache: "no-store" });
+    if (direct.ok) return direct;
+    if (direct.status !== 401 && direct.status !== 403) return direct;
+  } catch {
+    // fall through to the authenticated attempt
+  }
+
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!token) return null;
+  try {
+    return await fetch(url, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function blobGet<T>(pathname: string): Promise<T | null> {
   try {
     const { list } = await import("@vercel/blob");
@@ -65,8 +93,8 @@ async function blobGet<T>(pathname: string): Promise<T | null> {
 
     // Never decorate the URL: anything the store rejects turns a live record
     // into a silent null, which reads as "everything disappeared".
-    const res = await fetch(match.url, { cache: "no-store" });
-    if (!res.ok) return null;
+    const res = await fetchBlob(match.url);
+    if (!res?.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;

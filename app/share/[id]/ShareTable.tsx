@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { Certificate } from "@/lib/types";
+import { certificateHref } from "@/lib/certificate-link";
 
 function ordinalSuffix(n: number): string {
   const v = n % 100;
@@ -95,7 +96,7 @@ export default function ShareTable({
               <span className="cert-cat">{cert.category || "Open"}</span>
             </span>
 
-            <a href={cert.driveLink} target="_blank" rel="noreferrer" className="cert-open">
+            <a href={certificateHref(cert.driveLink)} target="_blank" rel="noreferrer" className="cert-open">
               Open <span aria-hidden>↗</span>
             </a>
           </li>

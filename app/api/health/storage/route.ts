@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchBlob } from "@/lib/storage";
 
 /**
  * Storage diagnostic: what is actually in the object store, and whether each
@@ -21,29 +22,29 @@ export async function GET() {
     const records = blobs.filter((b) => b.pathname.endsWith("/tournament.json"));
     const index = blobs.find((b) => b.pathname === "tournaments/index.json");
 
-    // Actually read each record — "the object exists" and "the app can read
-    // it" are different failures, and only the second explains a blank list.
+    // Read each record two ways. A public store answers both; a private one
+    // 403s the plain fetch and only answers the authenticated read — which is
+    // exactly why certificate links needed to move behind /api/file.
     const readable: Record<string, string> = {};
     for (const record of records) {
       const id = record.pathname.split("/")[1];
+      let direct = "?";
       try {
         const res = await fetch(record.url, { cache: "no-store" });
-        readable[id] = res.ok ? "ok" : `HTTP ${res.status}`;
+        direct = res.ok ? "ok" : `HTTP ${res.status}`;
       } catch (err: unknown) {
-        readable[id] = `fetch failed: ${err instanceof Error ? err.message : String(err)}`;
+        direct = `failed: ${err instanceof Error ? err.message : String(err)}`;
       }
+      const withToken = await fetchBlob(record.url);
+      readable[id] = `public=${direct}, authenticated=${withToken?.ok ? "ok" : `HTTP ${withToken?.status ?? "failed"}`}`;
     }
 
     let indexStatus = "missing";
     if (index) {
-      try {
-        const res = await fetch(index.url, { cache: "no-store" });
-        indexStatus = res.ok
-          ? `ok — ${((await res.json()) as unknown[]).length} entries`
-          : `HTTP ${res.status}`;
-      } catch (err: unknown) {
-        indexStatus = `fetch failed: ${err instanceof Error ? err.message : String(err)}`;
-      }
+      const res = await fetchBlob(index.url);
+      indexStatus = res?.ok
+        ? `ok — ${((await res.json()) as unknown[]).length} entries`
+        : `unreadable (HTTP ${res?.status ?? "failed"})`;
     }
 
     return NextResponse.json({
@@ -52,6 +53,7 @@ export async function GET() {
       index: indexStatus,
       tournamentRecords: records.length,
       certificateFiles: blobs.filter((b) => b.pathname.includes("/certs/")).length,
+      storeIsPublic: Object.values(readable).every((v) => v.startsWith("public=ok")),
       recordReadable: readable,
     });
   } catch (err: unknown) {
