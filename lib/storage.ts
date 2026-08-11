@@ -135,6 +135,31 @@ async function blobGet<T>(pathname: string): Promise<T | null> {
   }
 }
 
+/**
+ * Read/write an arbitrary JSON document through whichever backend is active.
+ * Anything that persists state must go through here — writing to a specific
+ * store directly is how the user records ended up stranded in a quota-blocked
+ * Blob store while everything else had moved to R2.
+ */
+export async function readJson<T>(pathname: string, fallback: T): Promise<T> {
+  if (!IS_VERCEL && !isR2Configured()) {
+    const file = path.join(process.cwd(), "data", pathname.replace(/\//g, "-"));
+    if (!fs.existsSync(file)) return fallback;
+    try { return JSON.parse(fs.readFileSync(file, "utf-8")) as T; } catch { return fallback; }
+  }
+  return (await blobGet<T>(pathname)) ?? fallback;
+}
+
+export async function writeJson(pathname: string, value: unknown): Promise<void> {
+  if (!IS_VERCEL && !isR2Configured()) {
+    const file = path.join(process.cwd(), "data", pathname.replace(/\//g, "-"));
+    ensureDir(path.dirname(file));
+    fs.writeFileSync(file, JSON.stringify(value, null, 2));
+    return;
+  }
+  await blobPut(pathname, JSON.stringify(value));
+}
+
 export async function blobUploadBuffer(
   buffer: Buffer,
   pathname: string,

@@ -6,13 +6,10 @@
  *
  * Stored alongside tournaments — local JSON in dev, Vercel Blob in production.
  */
-import fs from "fs";
-import path from "path";
 import crypto from "crypto";
+import { readJson, writeJson } from "./storage";
 
-const IS_VERCEL = !!process.env.VERCEL;
-const BLOB_PATH = "users/index.json";
-const LOCAL_PATH = path.join(process.cwd(), "data", "users.json");
+const STORE_PATH = "users/index.json";
 
 export type UserRole = "admin" | "organiser";
 export type UserStatus = "pending" | "approved" | "rejected";
@@ -58,34 +55,17 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 // ── Storage ────────────────────────────────────────────────────────────────
 
+/**
+ * Accounts live in the same store as everything else. They previously wrote
+ * to Vercel Blob directly, which left them stranded when that store's quota
+ * was exhausted and the rest of the app had moved to R2.
+ */
 async function readAll(): Promise<User[]> {
-  if (!IS_VERCEL) {
-    if (!fs.existsSync(LOCAL_PATH)) return [];
-    try { return JSON.parse(fs.readFileSync(LOCAL_PATH, "utf-8")); } catch { return []; }
-  }
-  const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: BLOB_PATH });
-  const match = blobs.find((b) => b.pathname === BLOB_PATH);
-  if (!match) return [];
-  const res = await fetch(`${match.url}?v=${Date.now()}`, { cache: "no-store" });
-  if (!res.ok) return [];
-  try { return (await res.json()) as User[]; } catch { return []; }
+  return readJson<User[]>(STORE_PATH, []);
 }
 
 async function writeAll(users: User[]): Promise<void> {
-  if (!IS_VERCEL) {
-    fs.mkdirSync(path.dirname(LOCAL_PATH), { recursive: true });
-    fs.writeFileSync(LOCAL_PATH, JSON.stringify(users, null, 2));
-    return;
-  }
-  const { put } = await import("@vercel/blob");
-  await put(BLOB_PATH, JSON.stringify(users), {
-    access: "public",
-    contentType: "application/json",
-    addRandomSuffix: false,
-    allowOverwrite: true,
-    cacheControlMaxAge: 0,
-  });
+  await writeJson(STORE_PATH, users);
 }
 
 // ── API ────────────────────────────────────────────────────────────────────
@@ -116,6 +96,12 @@ export async function createUser(input: {
   name: string;
   email?: string;
   organisation?: string;
+  /**
+   * Admin-created accounts only. The public sign-up route names the fields it
+   * forwards, so these can't be smuggled in from a request body.
+   */
+  role?: UserRole;
+  status?: UserStatus;
 }): Promise<{ user?: SafeUser; error?: string }> {
   const username = input.username.trim().toLowerCase();
 
@@ -143,10 +129,11 @@ export async function createUser(input: {
     name: input.name.trim(),
     email: input.email?.trim() || undefined,
     organisation: input.organisation?.trim() || undefined,
-    role: "organiser",
-    status: "pending",
+    role: input.role ?? "organiser",
+    status: input.status ?? "pending",
     passwordHash: hashPassword(input.password),
     createdAt: new Date().toISOString(),
+    approvedAt: input.status === "approved" ? new Date().toISOString() : undefined,
   };
 
   users.push(user);
