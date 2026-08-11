@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { use } from "react";
 import type { Tournament } from "@/lib/types";
+import { certificateHref } from "@/lib/certificate-link";
 
 const STATUS_COLOR: Record<string, string> = {
   draft:      "text-gray-600 bg-gray-100",
@@ -463,7 +464,7 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
                     <td className="px-6 py-3 text-gray-500">{cert.category || "Open"}</td>
                     <td className="px-6 py-3">
                       <a
-                        href={cert.driveLink}
+                        href={certificateHref(cert.driveLink)}
                         target="_blank"
                         rel="noreferrer"
                         className="inline-flex items-center gap-1.5 text-blue-600 hover:text-blue-800 font-medium"

@@ -12,6 +12,9 @@
 import fs from "fs";
 import path from "path";
 import type { Tournament } from "./types";
+import {
+  isR2Configured, r2Put, r2GetBuffer, r2GetStream, r2List, r2DeletePrefix, r2Href, keyFromHref,
+} from "./r2";
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -43,6 +46,10 @@ function writeLocal(t: Tournament[]) {
  * instantly.
  */
 async function blobPut(pathname: string, data: string | Buffer, contentType = "application/json") {
+  if (isR2Configured()) {
+    await r2Put(pathname, Buffer.isBuffer(data) ? data : Buffer.from(data), contentType);
+    return;
+  }
   const { put } = await import("@vercel/blob");
   await put(pathname, data, {
     access: "public",
@@ -52,7 +59,62 @@ async function blobPut(pathname: string, data: string | Buffer, contentType = "a
   });
 }
 
+/**
+ * Read a blob's contents.
+ *
+ * Object URLs answer 403 on this store — for both anonymous requests and ones
+ * carrying the token as a bearer header, because that isn't how blob auth
+ * works. The SDK's `get` is the supported read path: it resolves the object
+ * from the store using the token. Try public first, then private, since which
+ * one applies is a property of the store rather than of this code.
+ */
+export interface BlobContent {
+  stream: ReadableStream<Uint8Array> | null;
+  contentType: string | null;
+}
+
+export async function fetchBlob(urlOrPathname: string): Promise<BlobContent | null> {
+  if (isR2Configured()) {
+    const key = keyFromHref(urlOrPathname) ?? urlOrPathname;
+    return r2GetStream(key);
+  }
+
+  const { get } = await import("@vercel/blob");
+
+  for (const access of ["public", "private"] as const) {
+    try {
+      const result = await get(urlOrPathname, { access });
+      if (result?.statusCode === 200 && result.stream) {
+        return {
+          stream: result.stream,
+          contentType: result.headers?.get?.("content-type") ?? null,
+        };
+      }
+    } catch {
+      // Try the other access mode before giving up
+    }
+  }
+  return null;
+}
+
+/** Read a blob as text, or null when it can't be read. */
+async function blobText(urlOrPathname: string): Promise<string | null> {
+  const content = await fetchBlob(urlOrPathname);
+  if (!content?.stream) return null;
+  try {
+    return await new Response(content.stream).text();
+  } catch {
+    return null;
+  }
+}
+
 async function blobGet<T>(pathname: string): Promise<T | null> {
+  if (isR2Configured()) {
+    const buf = await r2GetBuffer(pathname);
+    if (!buf) return null;
+    try { return JSON.parse(buf.toString("utf-8")) as T; } catch { return null; }
+  }
+
   try {
     const { list } = await import("@vercel/blob");
     const { blobs } = await list({ prefix: pathname });
@@ -65,9 +127,9 @@ async function blobGet<T>(pathname: string): Promise<T | null> {
 
     // Never decorate the URL: anything the store rejects turns a live record
     // into a silent null, which reads as "everything disappeared".
-    const res = await fetch(match.url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    const text = await blobText(match.url);
+    if (!text) return null;
+    return JSON.parse(text) as T;
   } catch {
     return null;
   }
@@ -78,14 +140,16 @@ export async function blobUploadBuffer(
   pathname: string,
   contentType: string
 ): Promise<string> {
-  // Local dev has no Blob store — serve generated certificates from /public
+  // Local dev without a store — serve generated certificates from /public
   // so the whole flow (including the share page) works offline.
-  if (!IS_VERCEL) {
+  if (!IS_VERCEL && !isR2Configured()) {
     const file = path.join(process.cwd(), "public", "generated", pathname);
     ensureDir(path.dirname(file));
     fs.writeFileSync(file, buffer);
     return `/generated/${encodeURI(pathname)}`;
   }
+
+  if (isR2Configured()) return r2Put(pathname, buffer, contentType);
 
   const { put } = await import("@vercel/blob");
   const { url } = await put(pathname, buffer, { access: "public", contentType, addRandomSuffix: false });
@@ -124,16 +188,18 @@ function summarise(t: Tournament): Tournament {
  * mean the tournaments are gone.
  */
 async function rebuildIndex(): Promise<Tournament[]> {
-  const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: "tournaments/" });
-  const records = blobs.filter((b) => b.pathname.endsWith("/tournament.json"));
+  const records = isR2Configured()
+    ? (await r2List("tournaments/")).filter((k) => k.endsWith("/tournament.json"))
+    : (await (await import("@vercel/blob")).list({ prefix: "tournaments/" })).blobs
+        .filter((b) => b.pathname.endsWith("/tournament.json"))
+        .map((b) => b.url);
 
   const recovered: Tournament[] = [];
   for (const record of records) {
     try {
-      const res = await fetch(record.url, { cache: "no-store" });
-      if (!res.ok) continue;
-      recovered.push(summarise((await res.json()) as Tournament));
+      const text = await blobText(record);
+      if (!text) continue;
+      recovered.push(summarise(JSON.parse(text) as Tournament));
     } catch {
       // Skip anything unreadable rather than failing the whole rebuild
     }
@@ -207,6 +273,14 @@ export async function deleteTournament(id: string): Promise<boolean> {
     return true;
   }
 
+  if (isR2Configured()) {
+    await r2DeletePrefix(`tournaments/${id}/`);
+    const index = (await blobGet<Tournament[]>("tournaments/index.json")) ?? [];
+    const next = index.filter((t) => t.id !== id);
+    await blobPut("tournaments/index.json", JSON.stringify(next));
+    return true;
+  }
+
   const { list, del } = await import("@vercel/blob");
 
   // Delete every blob under this tournament's prefix (metadata + certificates)
@@ -249,9 +323,39 @@ export async function readUploadedFile(location: string): Promise<Buffer> {
     return Buffer.from(location.slice(7), "base64");
   }
   if (location.startsWith("http")) {
-    const res = await fetch(location);
-    if (!res.ok) throw new Error(`Failed to fetch file (${res.status})`);
-    return Buffer.from(await res.arrayBuffer());
+    // Object URLs aren't directly fetchable on this store — go through the SDK
+    const content = await fetchBlob(location);
+    if (!content?.stream) throw new Error("Could not read the uploaded file from storage.");
+    return Buffer.from(await new Response(content.stream).arrayBuffer());
   }
   return fs.readFileSync(location);
+}
+
+/**
+ * Store an uploaded source file (certificate template, participant list).
+ *
+ * These are kept as their own objects rather than embedded in the tournament
+ * record: the record is rewritten on every progress update, and carrying a
+ * few hundred KB of base64 through each of those writes burns storage quota
+ * enormously for no benefit.
+ */
+export async function saveSourceFile(
+  buffer: Buffer,
+  tournamentId: string,
+  filename: string,
+  contentType: string
+): Promise<string> {
+  if (!IS_VERCEL && !isR2Configured()) return saveUploadedFile(buffer, tournamentId, filename);
+
+  const key = `tournaments/${tournamentId}/source/${filename}`;
+  if (isR2Configured()) return r2Put(key, buffer, contentType);
+
+  const { put } = await import("@vercel/blob");
+  const { url } = await put(key, buffer, {
+    access: "public",
+    contentType,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+  return url;
 }

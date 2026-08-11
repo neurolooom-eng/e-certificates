@@ -6,6 +6,14 @@ import type { Certificate } from "@/lib/types";
 
 export const maxDuration = 300;
 
+/**
+ * Progress is saved — and the pause/stop flag checked — every this many
+ * certificates rather than on each one. Both touch the tournament record, so
+ * doing it per certificate multiplied storage traffic by the participant
+ * count for no visible benefit.
+ */
+const PROGRESS_INTERVAL = 20;
+
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const tournament = await getTournament(id);
@@ -74,9 +82,10 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       const prefix = categoryName ? `${categoryName}/` : "";
       const pathname = `tournaments/${id}/certs/${prefix}${cert.filename}`;
 
-      // Check the control flag between certificates so pause/stop take effect
-      // mid-run without killing the request from the outside.
-      const control = (await getTournament(id))?.generationControl;
+      // Check the control flag periodically so pause/stop take effect mid-run
+      // without killing the request from the outside.
+      const checkpoint = i % PROGRESS_INTERVAL === 0;
+      const control = checkpoint ? (await getTournament(id))?.generationControl : undefined;
       if (control === "pause" || control === "stop") {
         tournament.certificates = certificates;
         tournament.status = control === "pause" ? "paused" : "stopped";
@@ -106,7 +115,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
 
       tournament.certificates = certificates;
       tournament.progress = { current: certificates.length, total: allGenerated.length };
-      await saveTournament(tournament);
+      if (checkpoint) await saveTournament(tournament);
     }
 
     tournament.status = "ready";
