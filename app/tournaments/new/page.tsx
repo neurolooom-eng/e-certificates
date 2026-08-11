@@ -532,7 +532,7 @@ export default function NewTournamentPage() {
     const steps = [
       "Uploading certificate template…",
       "Uploading participant list…",
-      "Saving to Google Drive…",
+      "Saving the tournament…",
       "Almost done…",
     ];
     let stepIdx = 0;
@@ -1037,7 +1037,7 @@ export default function NewTournamentPage() {
             <div>
               <p className="text-sm font-medium text-blue-900">{submitStep}</p>
               <p className="text-xs text-blue-500 mt-0.5">
-                Files are being uploaded to Google Drive — this takes 15–30 seconds.
+                Uploading your template and participant lists — this takes 15–30 seconds.
               </p>
             </div>
           </div>
