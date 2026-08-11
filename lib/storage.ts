@@ -293,9 +293,36 @@ export async function readUploadedFile(location: string): Promise<Buffer> {
     return Buffer.from(location.slice(7), "base64");
   }
   if (location.startsWith("http")) {
-    const res = await fetch(location);
-    if (!res.ok) throw new Error(`Failed to fetch file (${res.status})`);
-    return Buffer.from(await res.arrayBuffer());
+    // Object URLs aren't directly fetchable on this store — go through the SDK
+    const content = await fetchBlob(location);
+    if (!content?.stream) throw new Error("Could not read the uploaded file from storage.");
+    return Buffer.from(await new Response(content.stream).arrayBuffer());
   }
   return fs.readFileSync(location);
+}
+
+/**
+ * Store an uploaded source file (certificate template, participant list).
+ *
+ * These are kept as their own objects rather than embedded in the tournament
+ * record: the record is rewritten on every progress update, and carrying a
+ * few hundred KB of base64 through each of those writes burns storage quota
+ * enormously for no benefit.
+ */
+export async function saveSourceFile(
+  buffer: Buffer,
+  tournamentId: string,
+  filename: string,
+  contentType: string
+): Promise<string> {
+  if (!IS_VERCEL) return saveUploadedFile(buffer, tournamentId, filename);
+
+  const { put } = await import("@vercel/blob");
+  const { url } = await put(`tournaments/${tournamentId}/source/${filename}`, buffer, {
+    access: "public",
+    contentType,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+  return url;
 }

@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
 import { visibleTo } from "@/lib/access";
 import { v4 as uuidv4 } from "uuid";
-import { readTournaments, saveTournament, saveUploadedFile } from "@/lib/storage";
+import { readTournaments, saveTournament, saveSourceFile } from "@/lib/storage";
 import type { Tournament, TournamentConfig, TournamentCategory } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -34,12 +34,13 @@ export async function POST(request: Request) {
   const config: TournamentConfig = JSON.parse(configJson);
   const templateBuffer = Buffer.from(await templateFile.arrayBuffer());
 
-  let templatePath: string;
-  if (IS_VERCEL) {
-    templatePath = `base64:${templateBuffer.toString("base64")}`;
-  } else {
-    templatePath = await saveUploadedFile(templateBuffer, id, `template.${templateFile.name.split(".").pop() || "jpg"}`);
-  }
+  const templateExt = templateFile.name.split(".").pop() || "jpg";
+  const templatePath = await saveSourceFile(
+    templateBuffer,
+    id,
+    `template.${templateExt}`,
+    templateFile.type || "image/jpeg"
+  );
 
   // Support multiple categories OR single data file (backwards compat)
   const categoriesJson = formData.get("categories") as string | null;
@@ -54,12 +55,12 @@ export async function POST(request: Request) {
       const file = formData.get(`categoryData_${i}`) as File | null;
       if (!file) continue;
       const buf = Buffer.from(await file.arrayBuffer());
-      let path: string;
-      if (IS_VERCEL) {
-        path = `base64:${buf.toString("base64")}`;
-      } else {
-        path = await saveUploadedFile(buf, id, `category_${i}_${file.name}`);
-      }
+      const path = await saveSourceFile(
+        buf,
+        id,
+        `category_${i}.xlsx`,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
       categories.push({
         name: categoryMeta[i].name,
         dataPath: path,
@@ -78,11 +79,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Missing participant list." }, { status: 400 });
     }
     const dataBuffer = Buffer.from(await dataFile.arrayBuffer());
-    if (IS_VERCEL) {
-      dataPath = `base64:${dataBuffer.toString("base64")}`;
-    } else {
-      dataPath = await saveUploadedFile(dataBuffer, id, `data.${dataFile.name.split(".").pop() || "xlsx"}`);
-    }
+    dataPath = await saveSourceFile(
+      dataBuffer,
+      id,
+      "data.xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
   }
 
   const tournament: Tournament = {
