@@ -58,11 +58,17 @@ async function blobGet<T>(pathname: string): Promise<T | null> {
   const { blobs } = await list({ prefix: pathname });
   const match = blobs.find((b) => b.pathname === pathname);
   if (!match) return null;
-  // Cache-bust as well: objects written before cacheControlMaxAge was set may
-  // still be sitting in the CDN with a long TTL.
-  const res = await fetch(`${match.url}?v=${Date.now()}`, { cache: "no-store" });
-  if (!res.ok) return null;
-  return res.json() as Promise<T>;
+
+  // Freshness comes from cacheControlMaxAge on write plus no-store here.
+  // Never decorate the URL — anything the object store rejects turns a live
+  // record into a silent null, which reads as "everything disappeared".
+  try {
+    const res = await fetch(match.url, { cache: "no-store" });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
 }
 
 export async function blobUploadBuffer(
@@ -86,10 +92,62 @@ export async function blobUploadBuffer(
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
+/** The lightweight record kept in the index — no embedded files. */
+function summarise(t: Tournament): Tournament {
+  return {
+    id: t.id,
+    name: t.name,
+    eventDate: t.eventDate,
+    createdAt: t.createdAt,
+    status: t.status,
+    templatePath: "",
+    dataPath: "",
+    config: t.config,
+    certificates: t.certificates.map(({ recipientName, driveLink, driveFileId, rowIndex, generatedAt, category, rank }) => ({
+      recipientName, driveLink, driveFileId, rowIndex, generatedAt, category, rank,
+    })),
+    driveFolderLink: t.driveFolderLink,
+    progress: t.progress,
+    eventType: t.eventType,
+    archived: t.archived,
+    generationControl: t.generationControl,
+    ownerId: t.ownerId,
+    ownerName: t.ownerName,
+  };
+}
+
+/**
+ * Rebuild the index from the per-tournament records, which are the source of
+ * truth. The index is a derived cache, so a damaged or missing one must never
+ * mean the tournaments are gone.
+ */
+async function rebuildIndex(): Promise<Tournament[]> {
+  const { list } = await import("@vercel/blob");
+  const { blobs } = await list({ prefix: "tournaments/" });
+  const records = blobs.filter((b) => b.pathname.endsWith("/tournament.json"));
+
+  const recovered: Tournament[] = [];
+  for (const record of records) {
+    try {
+      const res = await fetch(record.url, { cache: "no-store" });
+      if (!res.ok) continue;
+      recovered.push(summarise((await res.json()) as Tournament));
+    } catch {
+      // Skip anything unreadable rather than failing the whole rebuild
+    }
+  }
+
+  if (recovered.length > 0) {
+    await blobPut("tournaments/index.json", JSON.stringify(recovered));
+  }
+  return recovered;
+}
+
 export async function readTournaments(): Promise<Tournament[]> {
   if (!IS_VERCEL) return readLocal();
   const index = await blobGet<Tournament[]>("tournaments/index.json");
-  return index ?? [];
+  if (index && index.length > 0) return index;
+  return rebuildIndex();
 }
 
 export async function getTournament(id: string): Promise<Tournament | null> {
@@ -112,28 +170,13 @@ export async function saveTournament(tournament: Tournament) {
     JSON.stringify(tournament)
   );
 
-  // Update the lightweight index so the list page loads fast
-  const index = (await blobGet<Tournament[]>("tournaments/index.json")) ?? [];
-  const summary: Tournament = {
-    id: tournament.id,
-    name: tournament.name,
-    eventDate: tournament.eventDate,
-    createdAt: tournament.createdAt,
-    status: tournament.status,
-    templatePath: "",
-    dataPath: "",
-    config: tournament.config,
-    certificates: tournament.certificates.map(({ recipientName, driveLink, driveFileId, rowIndex, generatedAt, category, rank }) => ({
-      recipientName, driveLink, driveFileId, rowIndex, generatedAt, category, rank,
-    })),
-    driveFolderLink: tournament.driveFolderLink,
-    progress: tournament.progress,
-    eventType: tournament.eventType,
-    archived: tournament.archived,
-    generationControl: tournament.generationControl,
-    ownerId: tournament.ownerId,
-    ownerName: tournament.ownerName,
-  };
+  // Update the lightweight index so the list page loads fast. The index is
+  // derived data — if it can't be read, rebuild it from the per-tournament
+  // records rather than replacing it with a single-entry list.
+  let index = await blobGet<Tournament[]>("tournaments/index.json");
+  if (!index || index.length === 0) index = await rebuildIndex();
+
+  const summary = summarise(tournament);
   const i = index.findIndex((t) => t.id === tournament.id);
   if (i >= 0) index[i] = summary; else index.push(summary);
   await blobPut("tournaments/index.json", JSON.stringify(index));

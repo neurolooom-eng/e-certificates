@@ -200,8 +200,10 @@ export default function TournamentsPage() {
                 <p className="text-sm text-gray-500 mb-3">
                   {new Date(t.eventDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                 </p>
-                {session?.user?.role === "admin" && t.ownerName && (
-                  <p className="text-xs text-gray-400 mb-2">by {t.ownerName}</p>
+                {session?.user?.role === "admin" && (
+                  <p className="text-xs text-gray-400 mb-2">
+                    {t.ownerName ? `by ${t.ownerName}` : "no owner — visible to admins only"}
+                  </p>
                 )}
                 {t.certificates.length > 0 && (
                   <p className="text-sm font-medium text-brand-500">
