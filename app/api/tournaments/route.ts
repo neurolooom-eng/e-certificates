@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
+import { visibleTo } from "@/lib/access";
 import { v4 as uuidv4 } from "uuid";
 import { readTournaments, saveTournament, saveUploadedFile } from "@/lib/storage";
 import type { Tournament, TournamentConfig, TournamentCategory } from "@/lib/types";
@@ -12,11 +13,7 @@ const IS_VERCEL = !!process.env.VERCEL;
 export async function GET() {
   const session = await getServerSession(authOptions);
   const tournaments = await readTournaments();
-
-  // Admins see every tournament; organisers see only their own. Tournaments
-  // created before accounts existed have no owner and stay admin-only.
-  if (session?.user?.role === "admin") return NextResponse.json(tournaments);
-  return NextResponse.json(tournaments.filter((t) => t.ownerId === session?.user?.id));
+  return NextResponse.json(visibleTo(tournaments, session));
 }
 
 export async function POST(request: Request) {
