@@ -35,6 +35,13 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [shareUrl, setShareUrl] = useState(`/share/${id}`);
+
+  // Absolute URL for copy/paste — window is only available client-side
+  useEffect(() => {
+    setShareUrl(`${window.location.origin}/share/${id}`);
+  }, [id]);
 
   const fetchTournament = useCallback(async () => {
     const res = await fetch(`/api/tournaments/${id}`);
@@ -72,10 +79,20 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
   async function handleGenerate() {
     setGenerating(true);
     setGenerateError("");
-    const res = await fetch(`/api/tournaments/${id}/generate`, { method: "POST" });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setGenerateError(body.error || "Generation failed.");
+
+    // Generation runs for minutes. Don't block the UI on the response —
+    // flip to the progress view immediately and let polling drive it.
+    setTournament((t) => (t ? { ...t, status: "generating", progress: { current: 0, total: 0 } } : t));
+
+    try {
+      const res = await fetch(`/api/tournaments/${id}/generate`, { method: "POST" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setGenerateError(body.error || "Generation failed.");
+      }
+    } catch {
+      // The request can outlive the connection; the run continues server-side
+      // and polling picks up the result either way.
     }
     setGenerating(false);
     await fetchTournament();
@@ -217,7 +234,7 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
             <div className="border-t border-gray-100 pt-5">
               <h2 className="font-semibold text-gray-900 mb-1">Step 2 — Approve &amp; generate all certificates</h2>
               <p className="text-sm text-gray-500 mb-3">
-                Does the preview look correct? Click below to render every certificate and upload them to Google Drive.
+                Does the preview look correct? Click below to render and store every certificate. This runs in the background — you can watch the progress here.
               </p>
               <div className="flex gap-3">
                 <button
@@ -228,9 +245,13 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
                 </button>
                 <button
                   onClick={handleGenerate}
-                  className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
+                  disabled={generating}
+                  className="bg-green-600 hover:bg-green-700 disabled:opacity-60 text-white px-6 py-2 rounded-lg font-medium text-sm transition-colors flex items-center gap-2"
                 >
-                  ✓ Looks Good — Generate All
+                  {generating && (
+                    <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  {generating ? "Starting…" : "✓ Looks Good — Generate All"}
                 </button>
               </div>
               {generateError && (
@@ -250,7 +271,7 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
                 />
               </div>
               <div className="flex justify-between text-xs text-gray-500">
-                <span className="animate-pulse">Uploading to Google Drive…</span>
+                <span className="animate-pulse">{progress && progress.total > 0 ? "Rendering and uploading…" : "Starting up — rendering certificates…"}</span>
                 {progress && progress.total > 0 && (
                   <span className="font-medium text-gray-700">
                     {progress.current} / {progress.total}
@@ -275,21 +296,39 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
         </div>
       )}
 
-      {/* Drive folder link */}
-      {tournament.driveFolderLink && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-blue-900">All certificates are in a shared Google Drive folder</p>
-            <p className="text-xs text-blue-600 mt-0.5">Anyone with the link can view</p>
+      {/* Public share link */}
+      {tournament.certificates.length > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+          <p className="text-sm font-medium text-blue-900">Share this link with participants</p>
+          <p className="text-xs text-blue-600 mt-0.5 mb-3">
+            Anyone with the link can search for their name and download their certificate — no login needed.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              readOnly
+              value={shareUrl}
+              onFocus={(e) => e.currentTarget.select()}
+              className="flex-1 min-w-[220px] border border-blue-200 bg-white rounded-lg px-3 py-2 text-sm font-mono text-gray-700"
+            />
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(shareUrl);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors shrink-0"
+            >
+              {copied ? "✓ Copied" : "Copy link"}
+            </button>
+            <a
+              href={`/share/${id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-sm text-blue-700 hover:text-blue-900 font-medium px-2 shrink-0"
+            >
+              Open ↗
+            </a>
           </div>
-          <a
-            href={tournament.driveFolderLink}
-            target="_blank"
-            rel="noreferrer"
-            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors shrink-0 ml-4"
-          >
-            Open Folder ↗
-          </a>
         </div>
       )}
 

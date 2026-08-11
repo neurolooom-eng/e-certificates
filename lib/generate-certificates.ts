@@ -51,6 +51,28 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+/**
+ * Tidy a name from a results export. These write "Surname, First" and leave a
+ * dangling comma when only one name is present ("Viyan B,").
+ */
+function cleanName(text: string, mode: FieldConfig["nameCleanup"]): string {
+  if (mode === "none") return text;
+
+  // Collapse whitespace and drop commas at either end
+  const tidy = text.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "");
+
+  if (mode === "swap") {
+    const i = tidy.indexOf(",");
+    if (i > 0) {
+      const surname = tidy.slice(0, i).trim();
+      const rest = tidy.slice(i + 1).trim();
+      if (surname && rest) return `${rest} ${surname}`;
+    }
+  }
+
+  return tidy;
+}
+
 function formatValue(raw: unknown, fmt: FieldConfig["format"]): string {
   if (raw === null || raw === undefined || raw === "") return "";
   if (fmt === "ordinal") {
@@ -147,6 +169,8 @@ export interface GeneratedCertificate {
   name: string;
   buffer: Buffer;
   filename: string;
+  /** Finishing position, from the rank column when one is mapped. */
+  rank?: number;
 }
 
 export async function generateCertificates(
@@ -193,6 +217,7 @@ export async function generateCertificates(
     const row = rows[i];
     const values: Record<string, string> = {};
     let recipientName = "";
+    let rank: number | undefined;
 
     for (const field of config.fields) {
       // Where does this field's raw value come from?
@@ -210,9 +235,16 @@ export async function generateCertificates(
         continue;
       }
 
-      const text = formatValue(raw, field.format);
+      let text = formatValue(raw, field.format);
+      if (field.format === "text" && text) {
+        text = cleanName(text, field.nameCleanup ?? "trim");
+      }
       values[field.id] = text ? `${field.prefix ?? ""}${text}${field.suffix ?? ""}` : "";
       if (field.format === "text" && field.source !== "meta" && !recipientName) recipientName = text;
+      if (field.format === "ordinal" && rank === undefined) {
+        const n = Number(raw);
+        if (!isNaN(n)) rank = n;
+      }
     }
 
     const svgOverlay = buildSvgOverlay(width, height, config.fields, values, config.textColor);
@@ -224,7 +256,7 @@ export async function generateCertificates(
     const safeName = recipientName.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "_");
     const filename = `${String(i + 1).padStart(4, "0")}_${safeName}.png`;
 
-    results.push({ rowIndex: i, name: recipientName, buffer: outputBuffer, filename });
+    results.push({ rowIndex: i, name: recipientName, buffer: outputBuffer, filename, rank });
   }
 
   return results;

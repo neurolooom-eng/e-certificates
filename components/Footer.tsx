@@ -1,4 +1,12 @@
+"use client";
+
+import { usePathname } from "next/navigation";
+
 export function Footer() {
+  const pathname = usePathname();
+  // Public certificate pages carry their own footer-less design
+  if (pathname === "/" || pathname.startsWith("/share/")) return null;
+
   const build = process.env.NEXT_PUBLIC_BUILD_NUMBER ?? "0";
   const env = process.env.NEXT_PUBLIC_VERCEL_ENV ?? "local";
 
