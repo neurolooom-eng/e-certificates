@@ -12,6 +12,9 @@
 import fs from "fs";
 import path from "path";
 import type { Tournament } from "./types";
+import {
+  isR2Configured, r2Put, r2GetBuffer, r2GetStream, r2List, r2DeletePrefix, r2Href, keyFromHref,
+} from "./r2";
 
 const IS_VERCEL = !!process.env.VERCEL;
 
@@ -43,6 +46,10 @@ function writeLocal(t: Tournament[]) {
  * instantly.
  */
 async function blobPut(pathname: string, data: string | Buffer, contentType = "application/json") {
+  if (isR2Configured()) {
+    await r2Put(pathname, Buffer.isBuffer(data) ? data : Buffer.from(data), contentType);
+    return;
+  }
   const { put } = await import("@vercel/blob");
   await put(pathname, data, {
     access: "public",
@@ -67,6 +74,11 @@ export interface BlobContent {
 }
 
 export async function fetchBlob(urlOrPathname: string): Promise<BlobContent | null> {
+  if (isR2Configured()) {
+    const key = keyFromHref(urlOrPathname) ?? urlOrPathname;
+    return r2GetStream(key);
+  }
+
   const { get } = await import("@vercel/blob");
 
   for (const access of ["public", "private"] as const) {
@@ -97,6 +109,12 @@ async function blobText(urlOrPathname: string): Promise<string | null> {
 }
 
 async function blobGet<T>(pathname: string): Promise<T | null> {
+  if (isR2Configured()) {
+    const buf = await r2GetBuffer(pathname);
+    if (!buf) return null;
+    try { return JSON.parse(buf.toString("utf-8")) as T; } catch { return null; }
+  }
+
   try {
     const { list } = await import("@vercel/blob");
     const { blobs } = await list({ prefix: pathname });
@@ -122,14 +140,16 @@ export async function blobUploadBuffer(
   pathname: string,
   contentType: string
 ): Promise<string> {
-  // Local dev has no Blob store — serve generated certificates from /public
+  // Local dev without a store — serve generated certificates from /public
   // so the whole flow (including the share page) works offline.
-  if (!IS_VERCEL) {
+  if (!IS_VERCEL && !isR2Configured()) {
     const file = path.join(process.cwd(), "public", "generated", pathname);
     ensureDir(path.dirname(file));
     fs.writeFileSync(file, buffer);
     return `/generated/${encodeURI(pathname)}`;
   }
+
+  if (isR2Configured()) return r2Put(pathname, buffer, contentType);
 
   const { put } = await import("@vercel/blob");
   const { url } = await put(pathname, buffer, { access: "public", contentType, addRandomSuffix: false });
@@ -168,14 +188,16 @@ function summarise(t: Tournament): Tournament {
  * mean the tournaments are gone.
  */
 async function rebuildIndex(): Promise<Tournament[]> {
-  const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: "tournaments/" });
-  const records = blobs.filter((b) => b.pathname.endsWith("/tournament.json"));
+  const records = isR2Configured()
+    ? (await r2List("tournaments/")).filter((k) => k.endsWith("/tournament.json"))
+    : (await (await import("@vercel/blob")).list({ prefix: "tournaments/" })).blobs
+        .filter((b) => b.pathname.endsWith("/tournament.json"))
+        .map((b) => b.url);
 
   const recovered: Tournament[] = [];
   for (const record of records) {
     try {
-      const text = await blobText(record.url);
+      const text = await blobText(record);
       if (!text) continue;
       recovered.push(summarise(JSON.parse(text) as Tournament));
     } catch {
@@ -251,6 +273,14 @@ export async function deleteTournament(id: string): Promise<boolean> {
     return true;
   }
 
+  if (isR2Configured()) {
+    await r2DeletePrefix(`tournaments/${id}/`);
+    const index = (await blobGet<Tournament[]>("tournaments/index.json")) ?? [];
+    const next = index.filter((t) => t.id !== id);
+    await blobPut("tournaments/index.json", JSON.stringify(next));
+    return true;
+  }
+
   const { list, del } = await import("@vercel/blob");
 
   // Delete every blob under this tournament's prefix (metadata + certificates)
@@ -315,10 +345,13 @@ export async function saveSourceFile(
   filename: string,
   contentType: string
 ): Promise<string> {
-  if (!IS_VERCEL) return saveUploadedFile(buffer, tournamentId, filename);
+  if (!IS_VERCEL && !isR2Configured()) return saveUploadedFile(buffer, tournamentId, filename);
+
+  const key = `tournaments/${tournamentId}/source/${filename}`;
+  if (isR2Configured()) return r2Put(key, buffer, contentType);
 
   const { put } = await import("@vercel/blob");
-  const { url } = await put(`tournaments/${tournamentId}/source/${filename}`, buffer, {
+  const { url } = await put(key, buffer, {
     access: "public",
     contentType,
     addRandomSuffix: false,
