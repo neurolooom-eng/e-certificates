@@ -268,6 +268,21 @@ export default function NewTournamentPage() {
   const [name, setName] = useState("");
   const [eventDate, setEventDate] = useState("");
   const [eventType, setEventType] = useState<EventType>("open");
+  const [academyId, setAcademyId] = useState("");
+  const [academies, setAcademies] = useState<{ id: string; name: string }[]>([]);
+  // Which academy this runs under. Only academies the user belongs to are
+  // offered; the server re-checks membership before stamping it.
+  useEffect(() => {
+    fetch("/api/academies")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.academies) return;
+        setAcademies(d.academies);
+        if (d.academies.length === 1) setAcademyId(d.academies[0].id);
+      })
+      .catch(() => {});
+  }, []);
+
   const [detecting, setDetecting] = useState(false);
   const [detectMsg, setDetectMsg] = useState("");
   const [templateFile, setTemplateFile] = useState<File | null>(null);
@@ -533,6 +548,7 @@ export default function NewTournamentPage() {
     fd.append("name", name);
     fd.append("eventDate", eventDate);
     fd.append("eventType", eventType);
+    if (academyId) fd.append("academyId", academyId);
     fd.append("template", templateFile);
     fd.append("categories", JSON.stringify(validCategories.map((c) => ({
       name: c.name.trim(),
@@ -600,6 +616,24 @@ export default function NewTournamentPage() {
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
+            {academies.length > 0 && (
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Academy</label>
+                <select
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  value={academyId}
+                  onChange={(e) => setAcademyId(e.target.value)}
+                >
+                  <option value="">No academy</option>
+                  {academies.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">
+                  The academy&apos;s owners will be able to see this tournament.
+                </p>
+              </div>
+            )}
             <div className="col-span-2 sm:col-span-1">
               <label className="block text-sm font-medium text-gray-700 mb-1">Event Type *</label>
               <select

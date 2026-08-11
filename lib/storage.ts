@@ -204,6 +204,10 @@ function summarise(t: Tournament): Tournament {
     generationControl: t.generationControl,
     ownerId: t.ownerId,
     ownerName: t.ownerName,
+    // Carried into the index because visibility is decided from the list,
+    // without reading each full record.
+    academyId: t.academyId,
+    academyName: t.academyName,
   };
 }
 

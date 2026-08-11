@@ -2,6 +2,7 @@ import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
 import { authOptions } from "./auth-options";
 import { envAdmin } from "./users";
+import { ownedAcademyIds, isOwnerOf } from "./academies";
 import type { Tournament } from "./types";
 
 /**
@@ -19,22 +20,39 @@ export function isAdmin(session: Session | null): boolean {
   );
 }
 
-/** Tournaments an account may see: everything for admins, own for organisers. */
-export function visibleTo(tournaments: Tournament[], session: Session | null): Tournament[] {
-  // Admins see every tournament, including ones with no owner recorded —
-  // those predate accounts and would otherwise belong to nobody.
+/**
+ * Tournaments an account may see:
+ *   admin  — everything, including tournaments with no owner recorded, which
+ *            predate accounts and would otherwise belong to nobody;
+ *   owner  — everything run under any academy they own, whoever created it;
+ *   member — only what they created themselves.
+ */
+export async function visibleTo(
+  tournaments: Tournament[],
+  session: Session | null
+): Promise<Tournament[]> {
   if (isAdmin(session)) return tournaments;
-  if (!session?.user?.id) return [];
-  return tournaments.filter((t) => t.ownerId === session.user.id);
+  const userId = session?.user?.id;
+  if (!userId) return [];
+
+  const owned = await ownedAcademyIds(userId);
+  return tournaments.filter(
+    (t) => t.ownerId === userId || (!!t.academyId && owned.includes(t.academyId))
+  );
 }
 
 /**
- * Admins may act on any tournament; an organiser only on their own.
- * Unowned tournaments stay admin-only rather than becoming everyone's.
+ * Admins may act on any tournament, academy owners on anything run under an
+ * academy they own, and everyone else only on their own. Unowned tournaments
+ * stay admin-only rather than becoming everyone's.
  */
 export async function canAccess(tournament: Tournament): Promise<boolean> {
   const session = await getServerSession(authOptions);
   if (!session?.user) return false;
   if (isAdmin(session)) return true;
-  return !!tournament.ownerId && tournament.ownerId === session.user.id;
+
+  const userId = session.user.id;
+  if (!userId) return false;
+  if (tournament.ownerId === userId) return true;
+  return !!tournament.academyId && (await isOwnerOf(userId, tournament.academyId));
 }

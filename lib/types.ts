@@ -83,6 +83,12 @@ export interface Tournament {
   /** Account that created it. Absent on tournaments made before accounts existed. */
   ownerId?: string;
   ownerName?: string;
+  /**
+   * Academy it was run under. Absent on tournaments created before academies
+   * existed, which stay visible to admins only.
+   */
+  academyId?: string;
+  academyName?: string;
   progress?: GenerationProgress;
   id: string;
   name: string;
