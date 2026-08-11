@@ -68,6 +68,42 @@ export function r2ConfigProblem(): string | null {
   return null;
 }
 
+/**
+ * A safe fingerprint of each configured value: enough to recognise a wrong
+ * paste (a secret in the account-id slot, an unsplit multi-line block, a
+ * value that never actually saved) without ever echoing a credential.
+ */
+export function describeR2Env(): Record<string, string> {
+  const names = [
+    "R2_ACCOUNT_ID",
+    "R2_ACCESS_KEY_ID",
+    "R2_SECRET_ACCESS_KEY",
+    "R2_BUCKET",
+    "R2_PUBLIC_BASE_URL",
+    "NEXT_PUBLIC_R2_PUBLIC_BASE_URL",
+  ];
+  const out: Record<string, string> = {};
+  for (const name of names) {
+    const raw = process.env[name];
+    if (raw === undefined) {
+      out[name] = "not set";
+      continue;
+    }
+    const notes: string[] = [`${raw.length} chars`];
+    if (raw !== raw.trim()) notes.push("has surrounding whitespace");
+    if (/[\r\n]/.test(raw)) notes.push("contains a line break — looks like a multi-value paste");
+    if (/^https?:\/\//i.test(raw.trim())) notes.push("is a URL");
+    if (/=/.test(raw)) notes.push("contains '=' — may include a variable name");
+    // The bucket and public URL aren't secret; the keys are, so only shape.
+    const shown = name === "R2_BUCKET" || name.includes("PUBLIC")
+      ? JSON.stringify(raw)
+      : `starts "${raw.trim().slice(0, 6)}…"`;
+    out[name] = `${shown} — ${notes.join(", ")}`;
+  }
+  out.derivedAccountId = accountId() || "(empty)";
+  return out;
+}
+
 let client: S3Client | null = null;
 
 function r2(): S3Client {

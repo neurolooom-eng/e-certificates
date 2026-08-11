@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchBlob } from "@/lib/storage";
-import { isR2Configured, r2List, r2GetBuffer, r2ConfigProblem, accountId, publicBaseUrl } from "@/lib/r2";
+import { isR2Configured, r2List, r2GetBuffer, r2ConfigProblem, accountId, publicBaseUrl, describeR2Env } from "@/lib/r2";
 
 /**
  * Storage diagnostic: what is actually in the object store, and whether each
@@ -25,7 +25,10 @@ export async function GET() {
     // and say which variable is wrong.
     const problem = r2ConfigProblem();
     if (problem) {
-      return NextResponse.json({ backend: "cloudflare-r2", configError: problem }, { status: 500 });
+      return NextResponse.json(
+        { backend: "cloudflare-r2", configError: problem, variables: describeR2Env() },
+        { status: 500 }
+      );
     }
 
     try {
