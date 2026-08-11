@@ -36,9 +36,21 @@ function writeLocal(t: Tournament[]) {
 
 // ── Blob helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Metadata is read back immediately after being written (status changes,
+ * generation progress), so it must not be cached. Blob URLs are served from
+ * the CDN, which otherwise returns the previous copy — a status saved as
+ * "previewed" reads back as "draft" and the UI never advances.
+ */
 async function blobPut(pathname: string, data: string | Buffer, contentType = "application/json") {
   const { put } = await import("@vercel/blob");
-  await put(pathname, data, { access: "public", contentType, addRandomSuffix: false, allowOverwrite: true });
+  await put(pathname, data, {
+    access: "public",
+    contentType,
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    cacheControlMaxAge: 0,
+  });
 }
 
 async function blobGet<T>(pathname: string): Promise<T | null> {
@@ -46,7 +58,9 @@ async function blobGet<T>(pathname: string): Promise<T | null> {
   const { blobs } = await list({ prefix: pathname });
   const match = blobs.find((b) => b.pathname === pathname);
   if (!match) return null;
-  const res = await fetch(match.url);
+  // Cache-bust as well: objects written before cacheControlMaxAge was set may
+  // still be sitting in the CDN with a long TTL.
+  const res = await fetch(`${match.url}?v=${Date.now()}`, { cache: "no-store" });
   if (!res.ok) return null;
   return res.json() as Promise<T>;
 }
@@ -107,6 +121,8 @@ export async function saveTournament(tournament: Tournament) {
     progress: tournament.progress,
     eventType: tournament.eventType,
     archived: tournament.archived,
+    ownerId: tournament.ownerId,
+    ownerName: tournament.ownerName,
   };
   const i = index.findIndex((t) => t.id === tournament.id);
   if (i >= 0) index[i] = summary; else index.push(summary);

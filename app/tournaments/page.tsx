@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import type { Tournament } from "@/lib/types";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -12,6 +13,7 @@ const STATUS_BADGE: Record<string, string> = {
 };
 
 export default function TournamentsPage() {
+  const { data: session } = useSession();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [loading, setLoading] = useState(true);
   const [showArchived, setShowArchived] = useState(false);
@@ -198,6 +200,9 @@ export default function TournamentsPage() {
                 <p className="text-sm text-gray-500 mb-3">
                   {new Date(t.eventDate).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                 </p>
+                {session?.user?.role === "admin" && t.ownerName && (
+                  <p className="text-xs text-gray-400 mb-2">by {t.ownerName}</p>
+                )}
                 {t.certificates.length > 0 && (
                   <p className="text-sm font-medium text-brand-500">
                     {t.certificates.length} certificate{t.certificates.length !== 1 ? "s" : ""} generated

@@ -687,91 +687,94 @@ export default function NewTournamentPage() {
                 ? "One participant Excel (.xlsx) for the whole event."
                 : "Each category has its own participant Excel (.xlsx). All use the same certificate template."}
             </p>
-            <div className="space-y-3">
+            {/* One row per category: name · file · age · gender · rounds */}
+            <div className="space-y-2">
+              {categories.length > 0 && (
+                <div className="hidden sm:flex items-center gap-2 px-1 text-[11px] uppercase tracking-wide text-gray-400">
+                  {eventType !== "open" && <span className="w-40 shrink-0">Category</span>}
+                  <span className="flex-1">Participant list</span>
+                  <span className="w-16 shrink-0">Age</span>
+                  <span className="w-24 shrink-0">Gender</span>
+                  <span className="w-16 shrink-0">Rounds</span>
+                  {eventType !== "open" && <span className="w-6 shrink-0" />}
+                </div>
+              )}
+
               {categories.map((cat) => {
                 const setCat = (patch: Partial<CategoryEntry>) =>
                   setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, ...patch } : c)));
                 return (
-                  <div key={cat.id} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                    <div className="flex items-center gap-3">
-                      {eventType !== "open" && (
-                        <input
-                          className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-44 shrink-0"
-                          placeholder="e.g. Under 10 Open"
-                          value={cat.name}
-                          onChange={(e) => setCat({ name: e.target.value })}
-                        />
-                      )}
-                      <label className="flex-1 border-2 border-dashed border-gray-300 rounded-lg px-3 py-2 text-center cursor-pointer hover:border-brand-500 transition-colors">
-                        {cat.file ? (
-                          <span className="text-sm text-green-600">✓ {cat.file.name}</span>
-                        ) : (
-                          <span className="text-sm text-gray-400">Upload .xlsx</span>
-                        )}
-                        <input
-                          type="file"
-                          accept=".xlsx,.xls"
-                          className="hidden"
-                          onChange={(e) => e.target.files?.[0] && handleCategoryFile(cat.id, e.target.files[0])}
-                        />
-                      </label>
-                      {eventType !== "open" && categories.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => setCategories((prev) => prev.filter((c) => c.id !== cat.id))}
-                          className="text-red-400 hover:text-red-600 text-sm shrink-0"
-                        >
-                          Remove
-                        </button>
-                      )}
-                    </div>
+                  <div key={cat.id} className="flex flex-wrap sm:flex-nowrap items-center gap-2">
+                    {eventType !== "open" && (
+                      <input
+                        className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-40 shrink-0"
+                        placeholder="Under 10 Open"
+                        value={cat.name}
+                        onChange={(e) => setCat({ name: e.target.value })}
+                      />
+                    )}
 
-                    {/* Category details — auto-read from the sheet header, editable */}
-                    {cat.file && (
-                      <div className="mt-3 pt-3 border-t border-gray-200">
-                        <p className="text-xs text-gray-500 mb-2">
-                          {cat.autoFilled
-                            ? "✓ Read from the sheet header — edit if anything is wrong."
-                            : "Couldn't read these from the sheet — fill them in manually."}
-                        </p>
-                        <div className="grid grid-cols-3 gap-3">
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Age group</label>
-                            <input
-                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                              placeholder="8"
-                              value={cat.age}
-                              onChange={(e) => setCat({ age: e.target.value })}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Gender</label>
-                            <select
-                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                              value={cat.gender}
-                              onChange={(e) => setCat({ gender: e.target.value })}
-                            >
-                              <option value="">—</option>
-                              <option value="Boys">Boys</option>
-                              <option value="Girls">Girls</option>
-                              <option value="Open">Open</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs text-gray-500 mb-1">Rounds</label>
-                            <input
-                              className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm"
-                              placeholder="6"
-                              value={cat.rounds}
-                              onChange={(e) => setCat({ rounds: e.target.value })}
-                            />
-                          </div>
-                        </div>
-                      </div>
+                    <label
+                      className={`flex-1 min-w-[160px] border rounded-lg px-3 py-2 cursor-pointer truncate transition-colors ${
+                        cat.file
+                          ? "border-green-300 bg-green-50 text-green-700"
+                          : "border-dashed border-gray-300 text-gray-400 hover:border-brand-500"
+                      }`}
+                      title={cat.file?.name}
+                    >
+                      <span className="text-sm">{cat.file ? `✓ ${cat.file.name}` : "Upload .xlsx"}</span>
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls"
+                        className="hidden"
+                        onChange={(e) => e.target.files?.[0] && handleCategoryFile(cat.id, e.target.files[0])}
+                      />
+                    </label>
+
+                    <input
+                      className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-16 shrink-0"
+                      placeholder="Age"
+                      title={cat.autoFilled ? "Read from the sheet — edit to override" : "Age group"}
+                      value={cat.age}
+                      onChange={(e) => setCat({ age: e.target.value })}
+                    />
+                    <select
+                      className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-24 shrink-0"
+                      value={cat.gender}
+                      onChange={(e) => setCat({ gender: e.target.value })}
+                    >
+                      <option value="">—</option>
+                      <option value="Boys">Boys</option>
+                      <option value="Girls">Girls</option>
+                      <option value="Open">Open</option>
+                    </select>
+                    <input
+                      className="border border-gray-300 rounded-lg px-2 py-2 text-sm w-16 shrink-0"
+                      placeholder="Rds"
+                      value={cat.rounds}
+                      onChange={(e) => setCat({ rounds: e.target.value })}
+                    />
+
+                    {eventType !== "open" && (
+                      <button
+                        type="button"
+                        onClick={() => setCategories((prev) => prev.filter((c) => c.id !== cat.id))}
+                        disabled={categories.length === 1}
+                        className="w-6 shrink-0 text-gray-300 hover:text-red-500 disabled:opacity-0 text-lg leading-none"
+                        aria-label="Remove category"
+                      >
+                        ×
+                      </button>
                     )}
                   </div>
                 );
               })}
+
+              {categories.some((c) => c.autoFilled) && (
+                <p className="text-xs text-gray-400 pt-1">
+                  ✓ Age, gender and rounds were read from the sheet headers — edit any cell to override.
+                </p>
+              )}
             </div>
           </div>
 

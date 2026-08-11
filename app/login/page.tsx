@@ -27,7 +27,15 @@ function LoginForm() {
     if (res?.ok) {
       router.push(callbackUrl);
     } else {
-      setError("Invalid username or password.");
+      // authorize() throws these so people know to wait rather than assume a typo
+      const raw = res?.error ?? "";
+      setError(
+        raw.includes("PENDING_APPROVAL")
+          ? "Your account is still awaiting approval by an administrator."
+          : raw.includes("ACCOUNT_REJECTED")
+          ? "This account has been suspended. Contact the administrator."
+          : "Invalid username or password."
+      );
       setLoading(false);
     }
   }
@@ -38,7 +46,7 @@ function LoginForm() {
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">🏆</div>
           <h1 className="text-2xl font-bold text-gray-900">E-Certificates</h1>
-          <p className="text-gray-500 text-sm mt-1">Admin Portal — Sign in to continue</p>
+          <p className="text-gray-500 text-sm mt-1">Sign in to create and manage certificates</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -81,6 +89,13 @@ function LoginForm() {
             {loading ? "Signing in…" : "Sign In"}
           </button>
         </form>
+
+        <p className="text-center text-sm text-gray-500 mt-6">
+          Need an account?{" "}
+          <a href="/signup" className="text-brand-500 hover:text-brand-600 font-medium">
+            Request access
+          </a>
+        </p>
       </div>
     </div>
   );

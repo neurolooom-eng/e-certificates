@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getTournament, saveTournament, readUploadedFile, blobUploadBuffer } from "@/lib/storage";
+import { canAccess } from "@/lib/access";
 import { generateCertificates } from "@/lib/generate-certificates";
 import type { Certificate } from "@/lib/types";
 
@@ -9,6 +10,9 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const tournament = await getTournament(id);
   if (!tournament) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canAccess(tournament))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   tournament.status = "generating";
   tournament.progress = { current: 0, total: 0 };

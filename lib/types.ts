@@ -74,6 +74,9 @@ export type EventType = "open" | "open_category" | "category";
 export interface Tournament {
   eventType?: EventType;
   archived?: boolean;
+  /** Account that created it. Absent on tournaments made before accounts existed. */
+  ownerId?: string;
+  ownerName?: string;
   progress?: GenerationProgress;
   id: string;
   name: string;
