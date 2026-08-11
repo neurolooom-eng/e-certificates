@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchBlob } from "@/lib/storage";
-import { isR2Configured, r2List, r2GetBuffer } from "@/lib/r2";
+import { isR2Configured, r2List, r2GetBuffer, r2ConfigProblem, accountId, publicBaseUrl, describeR2Env } from "@/lib/r2";
 
 /**
  * Storage diagnostic: what is actually in the object store, and whether each
@@ -21,6 +21,16 @@ export async function GET() {
 
   // Cloudflare R2 takes precedence when configured
   if (isR2Configured()) {
+    // A malformed value fails as an opaque SDK error, so check the shape first
+    // and say which variable is wrong.
+    const problem = r2ConfigProblem();
+    if (problem) {
+      return NextResponse.json(
+        { backend: "cloudflare-r2", configError: problem, variables: describeR2Env() },
+        { status: 500 }
+      );
+    }
+
     try {
       const keys = await r2List("tournaments/");
       const records = keys.filter((k) => k.endsWith("/tournament.json"));
@@ -32,8 +42,8 @@ export async function GET() {
       const index = await r2GetBuffer("tournaments/index.json");
       return NextResponse.json({
         backend: "cloudflare-r2",
-        bucket: process.env.R2_BUCKET,
-        servedFrom: process.env.R2_PUBLIC_BASE_URL ? "public bucket URL" : "through the app",
+        bucket: process.env.R2_BUCKET?.trim(),
+        servedFrom: publicBaseUrl() ? `public bucket URL (${publicBaseUrl()})` : "through the app",
         objectsSeen: keys.length,
         index: index ? `ok — ${(JSON.parse(index.toString()) as unknown[]).length} entries` : "missing",
         tournamentRecords: records.length,
@@ -42,7 +52,12 @@ export async function GET() {
       });
     } catch (err: unknown) {
       return NextResponse.json(
-        { backend: "cloudflare-r2", error: err instanceof Error ? err.message : String(err) },
+        {
+          backend: "cloudflare-r2",
+          error: err instanceof Error ? err.message : String(err),
+          endpoint: `https://${accountId()}.r2.cloudflarestorage.com`,
+          bucket: process.env.R2_BUCKET?.trim(),
+        },
         { status: 500 }
       );
     }
