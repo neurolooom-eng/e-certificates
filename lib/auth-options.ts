@@ -52,6 +52,17 @@ export const authOptions: NextAuthOptions = {
         token.role = (user as { role?: string }).role ?? "organiser";
         token.username = (user as { username?: string }).username ?? "";
       }
+
+      // Sessions issued before roles existed carry no role claim. The only
+      // login back then was the built-in admin, so upgrade those in place
+      // rather than logging everyone out.
+      if (!token.role) {
+        const isEnvAdmin = token.name === envAdmin().username;
+        token.role = isEnvAdmin ? "admin" : "organiser";
+        token.uid = token.uid ?? (isEnvAdmin ? "admin" : "");
+        token.username = token.username ?? String(token.name ?? "");
+      }
+
       return token;
     },
     async session({ session, token }) {
