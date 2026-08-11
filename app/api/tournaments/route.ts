@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
-import { visibleTo } from "@/lib/access";
+import { visibleTo, isAdmin } from "@/lib/access";
+import { isMember, getAcademy } from "@/lib/academies";
 import { v4 as uuidv4 } from "uuid";
 import { readTournaments, saveTournament, saveSourceFile } from "@/lib/storage";
 import type { Tournament, TournamentConfig, TournamentCategory } from "@/lib/types";
@@ -13,7 +14,7 @@ const IS_VERCEL = !!process.env.VERCEL;
 export async function GET() {
   const session = await getServerSession(authOptions);
   const tournaments = await readTournaments();
-  return NextResponse.json(visibleTo(tournaments, session));
+  return NextResponse.json(await visibleTo(tournaments, session));
 }
 
 export async function POST(request: Request) {
@@ -31,6 +32,22 @@ export async function POST(request: Request) {
   const session = await getServerSession(authOptions);
   const id = uuidv4();
   const eventType = (formData.get("eventType") as string) || undefined;
+
+  // Stamp the academy, but only one the creator actually belongs to —
+  // otherwise a member could file a tournament under someone else's banner.
+  const academyId = (formData.get("academyId") as string) || "";
+  let academy = null;
+  if (academyId) {
+    const userId = session?.user?.id;
+    const allowed = isAdmin(session) || (!!userId && (await isMember(userId, academyId)));
+    if (!allowed) {
+      return NextResponse.json({ error: "You are not a member of that academy." }, { status: 403 });
+    }
+    academy = await getAcademy(academyId);
+    if (!academy) {
+      return NextResponse.json({ error: "That academy no longer exists." }, { status: 400 });
+    }
+  }
   const config: TournamentConfig = JSON.parse(configJson);
   const templateBuffer = Buffer.from(await templateFile.arrayBuffer());
 
@@ -96,6 +113,8 @@ export async function POST(request: Request) {
     eventType: eventType as Tournament["eventType"],
     ownerId: session?.user?.id,
     ownerName: session?.user?.name ?? undefined,
+    academyId: academy?.id,
+    academyName: academy?.name,
     templatePath,
     dataPath,
     categories,
