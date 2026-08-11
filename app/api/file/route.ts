@@ -6,9 +6,10 @@ const ALLOWED_HOST_SUFFIX = ".blob.vercel-storage.com";
 /**
  * Serves a stored certificate.
  *
- * Certificate links point at the object store, but a store that isn't serving
- * public URLs answers 403 to the participant clicking the link. This fetches
- * the object with the store token and streams it back.
+ * Deliberately public: a certificate link has to work for the participant who
+ * receives it, whoever created the tournament and whether or not they have an
+ * account. The store's own URLs answer 403, so this reads the object through
+ * the SDK and streams it back.
  *
  * Only blob-storage URLs are accepted, so this can't be used as an open proxy.
  */
@@ -27,15 +28,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unsupported file location" }, { status: 400 });
   }
 
-  const res = await fetchBlob(parsed.toString());
-  if (!res?.ok) {
-    return NextResponse.json({ error: "Certificate unavailable" }, { status: res?.status ?? 502 });
+  const content = await fetchBlob(parsed.toString());
+  if (!content?.stream) {
+    return NextResponse.json({ error: "Certificate unavailable" }, { status: 404 });
   }
 
-  const filename = parsed.pathname.split("/").pop() || "certificate.png";
-  return new Response(res.body, {
+  const filename = decodeURIComponent(parsed.pathname.split("/").pop() || "certificate.png");
+  return new Response(content.stream, {
     headers: {
-      "Content-Type": res.headers.get("content-type") ?? "image/png",
+      "Content-Type": content.contentType ?? "image/png",
       "Content-Disposition": `inline; filename="${filename}"`,
       "Cache-Control": "public, max-age=31536000, immutable",
     },

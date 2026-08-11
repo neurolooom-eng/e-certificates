@@ -55,26 +55,42 @@ async function blobPut(pathname: string, data: string | Buffer, contentType = "a
 /**
  * Read a blob's contents.
  *
- * A store that isn't serving public URLs answers 403 on a plain fetch, which
- * would make every record look missing. Retry the same URL with the store
- * token so reads work whether or not the store is public.
+ * Object URLs answer 403 on this store — for both anonymous requests and ones
+ * carrying the token as a bearer header, because that isn't how blob auth
+ * works. The SDK's `get` is the supported read path: it resolves the object
+ * from the store using the token. Try public first, then private, since which
+ * one applies is a property of the store rather than of this code.
  */
-export async function fetchBlob(url: string): Promise<Response | null> {
-  try {
-    const direct = await fetch(url, { cache: "no-store" });
-    if (direct.ok) return direct;
-    if (direct.status !== 401 && direct.status !== 403) return direct;
-  } catch {
-    // fall through to the authenticated attempt
-  }
+export interface BlobContent {
+  stream: ReadableStream<Uint8Array> | null;
+  contentType: string | null;
+}
 
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) return null;
+export async function fetchBlob(urlOrPathname: string): Promise<BlobContent | null> {
+  const { get } = await import("@vercel/blob");
+
+  for (const access of ["public", "private"] as const) {
+    try {
+      const result = await get(urlOrPathname, { access });
+      if (result?.statusCode === 200 && result.stream) {
+        return {
+          stream: result.stream,
+          contentType: result.headers?.get?.("content-type") ?? null,
+        };
+      }
+    } catch {
+      // Try the other access mode before giving up
+    }
+  }
+  return null;
+}
+
+/** Read a blob as text, or null when it can't be read. */
+async function blobText(urlOrPathname: string): Promise<string | null> {
+  const content = await fetchBlob(urlOrPathname);
+  if (!content?.stream) return null;
   try {
-    return await fetch(url, {
-      cache: "no-store",
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    return await new Response(content.stream).text();
   } catch {
     return null;
   }
@@ -93,9 +109,9 @@ async function blobGet<T>(pathname: string): Promise<T | null> {
 
     // Never decorate the URL: anything the store rejects turns a live record
     // into a silent null, which reads as "everything disappeared".
-    const res = await fetchBlob(match.url);
-    if (!res?.ok) return null;
-    return (await res.json()) as T;
+    const text = await blobText(match.url);
+    if (!text) return null;
+    return JSON.parse(text) as T;
   } catch {
     return null;
   }
@@ -159,9 +175,9 @@ async function rebuildIndex(): Promise<Tournament[]> {
   const recovered: Tournament[] = [];
   for (const record of records) {
     try {
-      const res = await fetch(record.url, { cache: "no-store" });
-      if (!res.ok) continue;
-      recovered.push(summarise((await res.json()) as Tournament));
+      const text = await blobText(record.url);
+      if (!text) continue;
+      recovered.push(summarise(JSON.parse(text) as Tournament));
     } catch {
       // Skip anything unreadable rather than failing the whole rebuild
     }

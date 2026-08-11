@@ -35,16 +35,19 @@ export async function GET() {
       } catch (err: unknown) {
         direct = `failed: ${err instanceof Error ? err.message : String(err)}`;
       }
-      const withToken = await fetchBlob(record.url);
-      readable[id] = `public=${direct}, authenticated=${withToken?.ok ? "ok" : `HTTP ${withToken?.status ?? "failed"}`}`;
+      const viaSdk = await fetchBlob(record.url);
+      readable[id] = `publicUrl=${direct}, sdkRead=${viaSdk?.stream ? "ok" : "failed"}`;
     }
 
     let indexStatus = "missing";
     if (index) {
-      const res = await fetchBlob(index.url);
-      indexStatus = res?.ok
-        ? `ok — ${((await res.json()) as unknown[]).length} entries`
-        : `unreadable (HTTP ${res?.status ?? "failed"})`;
+      const content = await fetchBlob(index.url);
+      if (content?.stream) {
+        const parsed = JSON.parse(await new Response(content.stream).text()) as unknown[];
+        indexStatus = `ok — ${parsed.length} entries`;
+      } else {
+        indexStatus = "unreadable";
+      }
     }
 
     return NextResponse.json({
@@ -53,7 +56,7 @@ export async function GET() {
       index: indexStatus,
       tournamentRecords: records.length,
       certificateFiles: blobs.filter((b) => b.pathname.includes("/certs/")).length,
-      storeIsPublic: Object.values(readable).every((v) => v.startsWith("public=ok")),
+      storeServesPublicUrls: Object.values(readable).every((v) => v.startsWith("publicUrl=ok")),
       recordReadable: readable,
     });
   } catch (err: unknown) {
