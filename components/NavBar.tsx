@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 export function NavBar() {
   const { data: session } = useSession();
   const pathname = usePathname();
-  if (pathname === "/login") return null;
+  // Public-facing pages carry their own header — no admin chrome for participants
+  if (pathname === "/login" || pathname === "/" || pathname.startsWith("/share/")) return null;
 
   return (
     <nav className="bg-white border-b border-gray-200 shadow-sm">

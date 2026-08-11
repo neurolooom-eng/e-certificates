@@ -26,6 +26,14 @@ export interface FieldConfig {
   /** Literal text placed before/after the value, e.g. "Rounds: " or " Rounds". */
   prefix?: string;
   suffix?: string;
+  /**
+   * Cleanup for name columns. Results exports write names as "Surname, First"
+   * and often leave a trailing comma when there is no first name.
+   *  - "trim" (default for text): drop leading/trailing commas
+   *  - "swap": "Ayaan, Yukash" → "Yukash Ayaan"
+   *  - "none": leave the cell exactly as-is
+   */
+  nameCleanup?: "none" | "trim" | "swap";
 }
 
 export interface TournamentConfig {

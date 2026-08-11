@@ -51,6 +51,28 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+/**
+ * Tidy a name from a results export. These write "Surname, First" and leave a
+ * dangling comma when only one name is present ("Viyan B,").
+ */
+function cleanName(text: string, mode: FieldConfig["nameCleanup"]): string {
+  if (mode === "none") return text;
+
+  // Collapse whitespace and drop commas at either end
+  const tidy = text.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "");
+
+  if (mode === "swap") {
+    const i = tidy.indexOf(",");
+    if (i > 0) {
+      const surname = tidy.slice(0, i).trim();
+      const rest = tidy.slice(i + 1).trim();
+      if (surname && rest) return `${rest} ${surname}`;
+    }
+  }
+
+  return tidy;
+}
+
 function formatValue(raw: unknown, fmt: FieldConfig["format"]): string {
   if (raw === null || raw === undefined || raw === "") return "";
   if (fmt === "ordinal") {
@@ -210,7 +232,10 @@ export async function generateCertificates(
         continue;
       }
 
-      const text = formatValue(raw, field.format);
+      let text = formatValue(raw, field.format);
+      if (field.format === "text" && text) {
+        text = cleanName(text, field.nameCleanup ?? "trim");
+      }
       values[field.id] = text ? `${field.prefix ?? ""}${text}${field.suffix ?? ""}` : "";
       if (field.format === "text" && field.source !== "meta" && !recipientName) recipientName = text;
     }

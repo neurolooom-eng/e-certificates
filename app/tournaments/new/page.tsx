@@ -181,6 +181,21 @@ function FieldEditor({
           </>
         )}
 
+        {field.format === "text" && (
+          <div className="col-span-2">
+            <label className="block text-xs text-gray-500 mb-1">Name cleanup</label>
+            <select
+              className="w-full border rounded px-2 py-1.5 text-sm"
+              value={field.nameCleanup ?? "trim"}
+              onChange={(e) => set("nameCleanup", e.target.value)}
+            >
+              <option value="trim">Remove stray commas — &quot;Viyan B,&quot; → &quot;Viyan B&quot;</option>
+              <option value="swap">Surname first — &quot;Ayaan, Yukash&quot; → &quot;Yukash Ayaan&quot;</option>
+              <option value="none">Leave exactly as typed in the sheet</option>
+            </select>
+          </div>
+        )}
+
         <div>
           <label className="block text-xs text-gray-500 mb-1">
             {isTick ? "Tick Size (px)" : "Font Size (px)"}
