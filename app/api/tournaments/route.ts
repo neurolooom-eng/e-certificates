@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth-options";
 import { v4 as uuidv4 } from "uuid";
 import { readTournaments, saveTournament, saveUploadedFile } from "@/lib/storage";
 import type { Tournament, TournamentConfig, TournamentCategory } from "@/lib/types";
@@ -8,8 +10,13 @@ export const maxDuration = 60;
 const IS_VERCEL = !!process.env.VERCEL;
 
 export async function GET() {
+  const session = await getServerSession(authOptions);
   const tournaments = await readTournaments();
-  return NextResponse.json(tournaments);
+
+  // Admins see every tournament; organisers see only their own. Tournaments
+  // created before accounts existed have no owner and stay admin-only.
+  if (session?.user?.role === "admin") return NextResponse.json(tournaments);
+  return NextResponse.json(tournaments.filter((t) => t.ownerId === session?.user?.id));
 }
 
 export async function POST(request: Request) {
@@ -24,6 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
+  const session = await getServerSession(authOptions);
   const id = uuidv4();
   const eventType = (formData.get("eventType") as string) || undefined;
   const config: TournamentConfig = JSON.parse(configJson);
@@ -87,6 +95,8 @@ export async function POST(request: Request) {
     createdAt: new Date().toISOString(),
     status: "draft",
     eventType: eventType as Tournament["eventType"],
+    ownerId: session?.user?.id,
+    ownerName: session?.user?.name ?? undefined,
     templatePath,
     dataPath,
     categories,

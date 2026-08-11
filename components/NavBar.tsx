@@ -21,6 +21,11 @@ export function NavBar() {
           <div className="flex items-center gap-4">
             {session ? (
               <>
+                {session.user?.role === "admin" && (
+                  <a href="/users" className="text-sm text-gray-500 hover:text-gray-800">
+                    Accounts
+                  </a>
+                )}
                 <a
                   href="/tournaments/new"
                   className="bg-brand-500 hover:bg-brand-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"

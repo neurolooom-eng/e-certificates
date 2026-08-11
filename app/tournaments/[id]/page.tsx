@@ -113,7 +113,9 @@ export default function TournamentPage({ params }: { params: Promise<{ id: strin
   const status = tournament.status;
   const isReady = status === "ready";
   const isGenerating = status === "generating";
-  const isPreviewed = status === "previewed";
+  // A rendered preview in this session is enough to approve — don't make the
+  // Approve step wait on the saved status round-tripping back.
+  const isPreviewed = status === "previewed" || (!!previewUrl && status === "draft");
   const isDraft = status === "draft";
 
   const progress = tournament.progress;

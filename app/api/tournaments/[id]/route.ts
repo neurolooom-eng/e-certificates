@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
 import { getTournament, saveTournament, deleteTournament } from "@/lib/storage";
+import { canAccess } from "@/lib/access";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const tournament = await getTournament(id);
   if (!tournament) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canAccess(tournament))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
   return NextResponse.json(tournament);
 }
 
@@ -13,6 +17,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const tournament = await getTournament(id);
   if (!tournament) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canAccess(tournament))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   const body = await req.json().catch(() => ({}));
   if (typeof body.archived === "boolean") tournament.archived = body.archived;

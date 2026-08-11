@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { getTournament, saveTournament, readUploadedFile } from "@/lib/storage";
+import { canAccess } from "@/lib/access";
 import { generateCertificates } from "@/lib/generate-certificates";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const tournament = await getTournament(id);
   if (!tournament) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!(await canAccess(tournament))) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
 
   try {
     const dataLocation = tournament.categories?.[0]?.dataPath || tournament.dataPath;
