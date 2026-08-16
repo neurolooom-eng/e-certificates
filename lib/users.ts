@@ -151,6 +151,28 @@ export async function setUserStatus(id: string, status: UserStatus): Promise<Saf
   return toSafeUser(user);
 }
 
+/**
+ * Set a new password for an account.
+ *
+ * There is no way to reveal an existing password — it is stored as a scrypt
+ * hash, which is one-way. Resetting to a known value is the substitute: the
+ * caller shows it to the account holder once and it becomes unreadable again.
+ */
+export async function setPassword(
+  id: string,
+  password: string
+): Promise<{ user?: SafeUser; error?: string }> {
+  if (password.length < 8) return { error: "Password must be at least 8 characters." };
+
+  const users = await readAll();
+  const user = users.find((u) => u.id === id);
+  if (!user) return { error: "No such account." };
+
+  user.passwordHash = hashPassword(password);
+  await writeAll(users);
+  return { user: toSafeUser(user) };
+}
+
 export async function deleteUser(id: string): Promise<boolean> {
   const users = await readAll();
   const next = users.filter((u) => u.id !== id);

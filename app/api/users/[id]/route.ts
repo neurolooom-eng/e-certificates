@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth-options";
-import { deleteUser, setUserStatus, type UserStatus } from "@/lib/users";
+import { deleteUser, setUserStatus, setPassword, type UserStatus } from "@/lib/users";
 
 async function requireAdmin() {
   const session = await getServerSession(authOptions);
@@ -16,6 +16,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
   const { id } = await params;
   const body = await request.json().catch(() => ({}));
+
+  // Password reset. Existing passwords can't be revealed — they're stored as
+  // one-way hashes — so the admin sets a new one and passes it on.
+  if (typeof body.password === "string") {
+    const { user, error } = await setPassword(id, body.password);
+    if (error) return NextResponse.json({ error }, { status: 400 });
+    return NextResponse.json(user);
+  }
+
   const status = body.status as UserStatus;
 
   if (!["pending", "approved", "rejected"].includes(status)) {
