@@ -23,6 +23,8 @@ export default function UsersPage() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState("");
   const [added, setAdded] = useState("");
+  /** Reset passwords, shown once each — they can't be read back afterwards. */
+  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     const res = await fetch("/api/users");
@@ -66,12 +68,44 @@ export default function UsersPage() {
     setAdding(false);
   }
 
-  /** Suggested password, so the admin doesn't have to invent one. */
-  function suggestPassword() {
+  /**
+   * Reset an account's password. The existing one can't be shown — it is
+   * stored as a one-way hash — so a new one is set and displayed once here.
+   */
+  async function resetPassword(id: string, name: string) {
+    const generated = randomPassword();
+    const chosen = prompt(
+      `New password for ${name}.\n\nExisting passwords can't be shown — they're stored hashed. ` +
+        `Set a new one and pass it on.`,
+      generated
+    );
+    if (!chosen) return;
+
+    setBusy(id);
+    const res = await fetch(`/api/users/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: chosen }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      setResetPasswords((p) => ({ ...p, [id]: chosen }));
+      setError("");
+    } else {
+      setError(data.error || "Could not reset the password.");
+    }
+    setBusy(null);
+  }
+
+  function randomPassword() {
     const bytes = new Uint8Array(9);
     crypto.getRandomValues(bytes);
-    const pw = btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, "").slice(0, 12);
-    setDraft((d) => ({ ...d, password: pw }));
+    return btoa(String.fromCharCode(...bytes)).replace(/[+/=]/g, "").slice(0, 12);
+  }
+
+  /** Suggested password, so the admin doesn't have to invent one. */
+  function suggestPassword() {
+    setDraft((d) => ({ ...d, password: randomPassword() }));
   }
 
   async function remove(id: string) {
@@ -263,12 +297,26 @@ export default function UsersPage() {
                   </button>
                 )}
                 <button
+                  onClick={() => resetPassword(u.id, u.name)}
+                  disabled={busy === u.id}
+                  className="text-sm text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                >
+                  Reset password
+                </button>
+                <button
                   onClick={() => remove(u.id)}
                   disabled={busy === u.id}
                   className="text-sm text-red-400 hover:text-red-600 disabled:opacity-50"
                 >
                   Delete
                 </button>
+                {resetPasswords[u.id] && (
+                  <p className="w-full text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                    New password for @{u.username}:{" "}
+                    <code className="font-mono font-semibold">{resetPasswords[u.id]}</code> — pass it
+                    on now; it can&apos;t be shown again once you leave this page.
+                  </p>
+                )}
               </li>
             ))}
           </ul>
